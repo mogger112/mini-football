@@ -3,95 +3,100 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<meta name="theme-color" content="#0f1720">
+<meta name="theme-color" content="#23692a">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Футбол">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
 <title>Мини-футбол</title>
 <style>
   :root {
-    --bg: #0f1720; --panel: #17212c; --line: #2a3846; --text: #e6edf3; --muted: #8b98a5;
+    --grass: #23692a; --panel: #17212c; --line: #2a3846; --text: #e6edf3; --muted: #8b98a5;
     --blue: #2f7cf6; --red: #e5484d;
   }
   * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--grass); }
   body {
-    margin: 0; background: var(--bg); color: var(--text);
+    position: fixed; inset: 0; color: var(--text);
     font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
-    display: flex; flex-direction: column; align-items: center; min-height: 100vh;
+    touch-action: none; -webkit-user-select: none; user-select: none;
+    -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
   }
-  .top {
-    width: 100%; padding: 6px 16px 4px;
-    display: flex; align-items: center; justify-content: center; gap: 16px;
+  #game { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: crosshair; }
+  body.mobile #game { cursor: default; }
+
+  /* ---------- Табло ---------- */
+  .hud {
+    position: absolute; z-index: 20; top: calc(6px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 12px; padding: 4px 12px; white-space: nowrap;
+    background: rgba(10,16,22,.6); border-radius: 12px; pointer-events: none;
   }
-  .team { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 17px; }
-  .dot { width: 14px; height: 14px; border-radius: 50%; }
-  .num { font-size: 30px; font-weight: 800; font-variant-numeric: tabular-nums; min-width: 28px; text-align: center; }
-  .sep { font-size: 26px; color: var(--muted); }
-  .timer {
-    font-variant-numeric: tabular-nums; font-size: 17px; color: var(--text);
-    background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 3px 10px;
+  .team { display: flex; align-items: center; gap: 7px; font-weight: 700; font-size: 16px; }
+  .dot { width: 13px; height: 13px; border-radius: 50%; }
+  .num { font-size: 28px; font-weight: 800; font-variant-numeric: tabular-nums; min-width: 26px; text-align: center; line-height: 1.1; }
+  .sep { font-size: 24px; color: var(--muted); }
+  .timer { font-variant-numeric: tabular-nums; font-size: 16px; padding: 2px 8px; border-radius: 7px; background: rgba(255,255,255,.1); }
+  .hud-btns {
+    position: absolute; z-index: 20; display: flex; gap: 6px;
+    top: calc(6px + env(safe-area-inset-top)); right: calc(8px + env(safe-area-inset-right));
   }
-  .wrap { width: 100%; padding: 0 16px; display: flex; justify-content: center; }
-  canvas {
-    width: 100%; max-width: calc((100vh - 150px) * 1400 / 880); min-width: 280px; height: auto;
-    display: block; border-radius: 10px; background: #2a7f30; box-shadow: 0 10px 30px rgba(0,0,0,.45);
-    cursor: crosshair; user-select: none;
+  .icon-btn {
+    width: 40px; height: 36px; padding: 0; display: flex; align-items: center; justify-content: center;
+    background: rgba(10,16,22,.6); color: #fff; border: 1px solid rgba(255,255,255,.18); border-radius: 10px;
+    font-size: 18px; cursor: pointer;
   }
-  .panel {
-    width: 100%; max-width: 1500px; padding: 8px 16px 2px;
-    display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; justify-content: center;
+  .icon-btn:hover { background: rgba(10,16,22,.8); }
+  body.mobile .hud { gap: 8px; padding: 3px 10px; }
+  body.mobile .team { font-size: 13px; gap: 5px; }
+  body.mobile .num { font-size: 21px; min-width: 18px; }
+  body.mobile .sep { font-size: 18px; }
+  body.mobile .timer { font-size: 13px; padding: 1px 6px; }
+  body.mobile .icon-btn { width: 36px; height: 32px; font-size: 16px; }
+
+  /* ---------- Меню ---------- */
+  #menu {
+    position: fixed; inset: 0; z-index: 40; display: none; align-items: center; justify-content: center;
+    background: rgba(0,0,0,.55); padding: 12px; touch-action: auto;
   }
-  label { display: flex; align-items: center; gap: 6px; font-size: 14px; }
-  select, button {
-    background: var(--panel); color: var(--text); border: 1px solid var(--line);
-    border-radius: 8px; padding: 5px 10px; font-size: 14px; cursor: pointer; font-family: inherit;
+  body.menu-open #menu { display: flex; }
+  .card {
+    width: min(580px, 100%); max-height: 100%; overflow: auto; padding: 20px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
+    box-shadow: 0 20px 60px rgba(0,0,0,.6);
   }
-  button:hover, select:hover { border-color: #3d5266; }
-  button.on  { background: #1d3a25; border-color: #2f6d3c; }
-  button.off { background: #3d1f23; border-color: #74323a; }
-  input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--blue); }
-  .help { width: 100%; max-width: 1500px; padding: 4px 16px 14px; color: var(--muted); font-size: 13px; line-height: 1.8; text-align: center; }
+  .card h1 { margin: 0 0 14px; font-size: 24px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 18px; }
+  .grid label { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 15px; }
+  select, .card button {
+    background: #1f2b38; color: var(--text); border: 1px solid var(--line);
+    border-radius: 8px; padding: 7px 11px; font-size: 15px; cursor: pointer; font-family: inherit;
+  }
+  select:hover, .card button:hover { border-color: #3d5266; }
+  .card button.on  { background: #1d3a25; border-color: #2f6d3c; }
+  .card button.off { background: #3d1f23; border-color: #74323a; }
+  .card button.primary { background: #238636; border-color: #2ea043; font-weight: 700; padding: 9px 22px; }
+  .card button.primary:hover { background: #2ea043; }
+  input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--blue); }
+  .help { margin-top: 14px; color: var(--muted); font-size: 13px; line-height: 1.75; }
+  .help b { color: var(--text); font-weight: 600; }
   kbd {
     background: #24303c; border: 1px solid #33475a; border-bottom-width: 2px; border-radius: 4px;
     padding: 0 5px; font-size: 12px; color: var(--text); font-family: inherit;
   }
-  .mobile-only, #touch, #rotate { display: none; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+  body.mobile .desk-only, body:not(.mobile) .mobile-only { display: none !important; }
+  @media (max-width: 520px) { .grid { grid-template-columns: 1fr; } }
+  @media (max-height: 460px) { .card { padding: 14px 16px; } .card h1 { font-size: 19px; margin-bottom: 10px; } .help { margin-top: 10px; } }
 
-  /* ---------- Мобильная версия ---------- */
-  body.mobile {
-    position: fixed; inset: 0; overflow: hidden; min-height: 0;
-    touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
-  }
-  body.mobile .desk-only, body.mobile .help { display: none; }
-  body.mobile .mobile-only { display: inline-flex; }
-  body.mobile .top { padding: 4px 8px; gap: 10px; height: 40px; }
-  body.mobile .team { font-size: 13px; gap: 5px; }
-  body.mobile .num { font-size: 22px; min-width: 20px; }
-  body.mobile .sep { font-size: 20px; }
-  body.mobile .timer { font-size: 14px; padding: 2px 8px; }
-  body.mobile .icon-btn { padding: 4px 9px; font-size: 16px; line-height: 1; }
-  body.mobile .wrap { flex: 1; padding: 0 4px 4px; align-items: center; min-height: 0; }
-  body.mobile canvas {
-    border-radius: 6px; cursor: default;
-    max-width: calc((100vh - 48px) * 1400 / 880);
-    max-width: calc((100dvh - 48px) * 1400 / 880);
-  }
-  body.mobile .panel {
-    display: none; position: fixed; z-index: 40; left: 50%; top: 50%; transform: translate(-50%, -50%);
-    width: min(360px, 92vw); max-height: 90vh; max-height: 90dvh; overflow: auto;
-    flex-direction: column; align-items: stretch; gap: 12px; padding: 18px;
-    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
-    box-shadow: 0 20px 60px rgba(0,0,0,.6); touch-action: auto;
-  }
-  body.mobile .panel label { justify-content: space-between; font-size: 15px; }
-  body.mobile .panel select, body.mobile .panel button { padding: 9px 12px; font-size: 15px; }
-  body.mobile.menu-open .panel { display: flex; }
-  body.mobile.menu-open::after {
-    content: ""; position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 35;
-  }
+  /* ---------- Сенсорное управление ---------- */
+  #touch { display: none; }
   body.mobile #touch { display: block; position: fixed; inset: 0; z-index: 10; pointer-events: none; }
-  #joyZone { position: absolute; left: 0; top: 44px; bottom: 0; width: 50%; pointer-events: auto; touch-action: none; }
+  #joyZone { position: absolute; left: 0; top: 50px; bottom: 0; width: 50%; pointer-events: auto; touch-action: none; }
   #joyBase {
-    position: absolute; left: 28px; bottom: 26px; width: 124px; height: 124px; border-radius: 50%;
+    position: absolute; left: calc(26px + env(safe-area-inset-left)); bottom: 24px; width: 124px; height: 124px; border-radius: 50%;
     background: rgba(255,255,255,.10); border: 2px solid rgba(255,255,255,.35);
   }
   #joyKnob {
@@ -101,66 +106,47 @@
   .tbtn {
     position: absolute; pointer-events: auto; touch-action: none; border-radius: 50%;
     display: flex; align-items: center; justify-content: center; text-align: center;
-    color: #fff; font-weight: 700; border: 2px solid rgba(255,255,255,.5);
-    box-shadow: 0 4px 14px rgba(0,0,0,.4);
+    color: #fff; font-weight: 700; border: 2px solid rgba(255,255,255,.5); box-shadow: 0 4px 14px rgba(0,0,0,.4);
   }
-  #btnKick { right: 26px; bottom: 30px; width: 96px; height: 96px; font-size: 16px; background: rgba(229,72,77,.55); }
-  #btnHold { right: 39px; bottom: 140px; width: 70px; height: 70px; font-size: 13px; background: rgba(47,124,246,.5); }
+  #btnKick { right: calc(24px + env(safe-area-inset-right)); bottom: 28px; width: 96px; height: 96px; font-size: 16px; background: rgba(229,72,77,.6); }
+  #btnHold { right: calc(37px + env(safe-area-inset-right)); bottom: 138px; width: 70px; height: 70px; font-size: 13px; background: rgba(47,124,246,.55); }
   .tbtn.pressed { transform: scale(.92); filter: brightness(1.35); }
+
+  /* ---------- Прочее ---------- */
+  #rotate { display: none; }
   body.mobile #rotate {
-    position: fixed; inset: 0; z-index: 50; background: var(--bg);
-    flex-direction: column; align-items: center; justify-content: center; gap: 14px; text-align: center; padding: 24px;
+    position: fixed; inset: 0; z-index: 50; background: var(--grass);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; text-align: center; padding: 24px;
+    font-size: 17px;
   }
   #rotate .phone { font-size: 56px; animation: spin 2s ease-in-out infinite; }
+  #rotate button { background: rgba(0,0,0,.3); color: #fff; border: 1px solid rgba(255,255,255,.4); border-radius: 8px; padding: 8px 14px; font-size: 15px; }
   @keyframes spin { 0%, 30% { transform: rotate(0); } 60%, 100% { transform: rotate(-90deg); } }
   @media (orientation: landscape) { body.mobile #rotate { display: none; } }
   body.mobile.portrait-ok #rotate { display: none; }
+  .toast {
+    position: fixed; z-index: 60; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+    max-width: min(460px, 90vw); padding: 10px 14px; border-radius: 10px; text-align: center; font-size: 14px; line-height: 1.5;
+    background: rgba(0,0,0,.82); opacity: 0; transition: opacity .25s; pointer-events: none;
+  }
+  .toast.show { opacity: 1; }
 </style>
 </head>
 <body>
 
-<div class="top">
+<canvas id="game"></canvas>
+
+<div class="hud" id="hud">
   <div class="team"><span class="dot" style="background:var(--blue)"></span>Синие</div>
   <div class="num" id="scoreBlue">0</div>
   <div class="sep">:</div>
   <div class="num" id="scoreRed">0</div>
   <div class="team">Красные<span class="dot" style="background:var(--red)"></span></div>
   <div class="timer" id="timer">3:00</div>
-  <button class="mobile-only icon-btn" id="menuBtn" aria-label="Настройки">⚙</button>
-  <button class="mobile-only icon-btn" id="fsBtn" aria-label="Во весь экран">⛶</button>
 </div>
-
-<div class="wrap"><canvas id="game"></canvas></div>
-
-<div class="panel">
-  <button id="botsBtn" class="on">Боты: ВКЛ</button>
-  <label>Боты синих
-    <select id="blueBots"><option>0</option><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select>
-  </label>
-  <label>Боты красных
-    <select id="redBots"><option>0</option><option>1</option><option>2</option><option>3</option><option selected>4</option><option>5</option></select>
-  </label>
-  <label class="desk-only"><input type="checkbox" id="p2"> Второй игрок</label>
-  <label>Сложность
-    <select id="diff">
-      <option value="easy">Лёгкая</option>
-      <option value="normal" selected>Средняя</option>
-      <option value="hard">Сложная</option>
-    </select>
-  </label>
-  <label>Время
-    <select id="time">
-      <option value="60">1 мин</option>
-      <option value="120">2 мин</option>
-      <option value="180" selected>3 мин</option>
-      <option value="300">5 мин</option>
-      <option value="0">Без лимита</option>
-    </select>
-  </label>
-  <label><input type="checkbox" id="sound" checked> Звук</label>
-  <button id="pauseBtn">Пауза</button>
-  <button id="resetBtn">Новый матч</button>
-  <button class="mobile-only" id="closeMenuBtn" style="justify-content:center">Продолжить игру</button>
+<div class="hud-btns">
+  <button class="icon-btn" id="menuBtn" title="Меню (Esc)" aria-label="Меню">⚙</button>
+  <button class="icon-btn" id="fsBtn" title="Во весь экран (F)" aria-label="Во весь экран">⛶</button>
 </div>
 
 <div id="touch">
@@ -169,23 +155,66 @@
   <div id="btnKick" class="tbtn">Удар</div>
 </div>
 
+<div id="menu">
+  <div class="card">
+    <h1>⚽ Мини-футбол</h1>
+    <div class="grid">
+      <label>Боты <button id="botsBtn" class="on">ВКЛ</button></label>
+      <label>Сложность
+        <select id="diff">
+          <option value="easy">Лёгкая</option>
+          <option value="normal" selected>Средняя</option>
+          <option value="hard">Сложная</option>
+        </select>
+      </label>
+      <label>Боты синих
+        <select id="blueBots"><option>0</option><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select>
+      </label>
+      <label>Боты красных
+        <select id="redBots"><option>0</option><option>1</option><option>2</option><option>3</option><option selected>4</option><option>5</option></select>
+      </label>
+      <label>Время
+        <select id="time">
+          <option value="60">1 мин</option>
+          <option value="120">2 мин</option>
+          <option value="180" selected>3 мин</option>
+          <option value="300">5 мин</option>
+          <option value="0">Без лимита</option>
+        </select>
+      </label>
+      <label>Звук <input type="checkbox" id="sound" checked></label>
+      <label class="desk-only">Второй игрок <input type="checkbox" id="p2"></label>
+    </div>
+    <div class="help desk-only">
+      <b>P1 (синие):</b> <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> — бег ·
+      <b>зажать ЛКМ</b> — держать мяч и набирать силу, <b>отпустить</b> — удар в сторону курсора ·
+      <b>ПКМ</b> или <kbd>Shift</kbd> — вести мяч · <kbd>Пробел</kbd> — быстрый удар<br>
+      <b>P2 (красные):</b> стрелки — бег, <kbd>Enter</kbd> — удар, правый <kbd>Shift</kbd> — держать мяч<br>
+      <kbd>F</kbd> — весь экран · <kbd>Esc</kbd> — меню · <kbd>P</kbd> — пауза · <kbd>B</kbd> — боты вкл/выкл · <kbd>R</kbd> — новый матч
+    </div>
+    <div class="help mobile-only">
+      <b>Джойстик</b> — коснитесь левой половины экрана · <b>Удар</b> — зажать, чтобы держать мяч и набрать силу, отпустить — удар ·
+      <b>Держать</b> — вести мяч · <b>⛶</b> — весь экран
+    </div>
+    <div class="actions">
+      <button class="primary" id="playBtn">▶ Играть</button>
+      <button id="fsMenuBtn">⛶ Во весь экран</button>
+      <button id="resetBtn">↺ Новый матч</button>
+    </div>
+  </div>
+</div>
+
 <div id="rotate">
   <div class="phone">📱</div>
   <div>Поверните телефон горизонтально</div>
   <button id="portraitOk">Играть так</button>
 </div>
 
-<div class="help">
-  <b>P1 (синие):</b> <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> — бег &nbsp;·&nbsp;
-  <b>зажать ЛКМ</b> — держать мяч и набирать силу, <b>отпустить</b> — удар в сторону курсора &nbsp;·&nbsp;
-  <b>ПКМ</b> или <kbd>Shift</kbd> — держать мяч (вести) &nbsp;·&nbsp; <kbd>Пробел</kbd> — быстрый удар<br>
-  <b>P2 (красные):</b> стрелки — бег, <kbd>Enter</kbd> — удар, правый <kbd>Shift</kbd> — держать мяч &nbsp;·&nbsp;
-  <kbd>B</kbd> — боты вкл/выкл &nbsp;·&nbsp; <kbd>P</kbd>/<kbd>Esc</kbd> — пауза &nbsp;·&nbsp; <kbd>R</kbd> — новый матч
-</div>
+<div class="toast" id="toast"></div>
 
 <script>
 (() => {
-  // ---------- Размеры поля ----------
+  // ---------- Размеры поля (игровые координаты) ----------
   const W = 1400, H = 880;
   const F = { l: 60, r: 1340, t: 50, b: 830 };
   F.w = F.r - F.l; F.h = F.b - F.t; F.cx = (F.l + F.r) / 2; F.cy = (F.t + F.b) / 2;
@@ -203,6 +232,7 @@
   const HUMAN_KICK = 820;
   const BOT_KICK = 760;
   const MAX_BALL_V = 1150;
+  const GRASS = '#23692a';
 
   const COLORS = {
     0: { main: '#2f7cf6', keeper: '#1fb5a3' },
@@ -239,13 +269,27 @@
     (navigator.maxTouchPoints > 0 && Math.min(screen.width, screen.height) < 820);
   if (touchMode) document.body.classList.add('mobile');
 
-  // ---------- Canvas ----------
-  const canvas = document.getElementById('game');
+  const $ = id => document.getElementById(id);
+
+  // ---------- Canvas на весь экран ----------
+  const canvas = $('game');
   const ctx = canvas.getContext('2d');
   const dpr = Math.min(2, window.devicePixelRatio || 1);
-  canvas.width = W * dpr; canvas.height = H * dpr;
   const fieldCanvas = document.createElement('canvas');
-  fieldCanvas.width = W * dpr; fieldCanvas.height = H * dpr;
+  const view = { cw: 1, ch: 1, s: 1, ox: 0, oy: 0 };
+
+  function resize() {
+    const cw = window.innerWidth, ch = window.innerHeight;
+    canvas.width = Math.round(cw * dpr);
+    canvas.height = Math.round(ch * dpr);
+    // поле целиком помещается на экран, свободное место заполняется газоном
+    const hudBottom = $('hud').getBoundingClientRect().bottom + 4;
+    const s0 = Math.min(cw / W, ch / H);
+    const reserve = Math.max(0, hudBottom - ((ch - H * s0) / 2 + F.t * s0));
+    const s = Math.min(cw / W, (ch - reserve) / H);
+    Object.assign(view, { cw, ch, s, ox: (cw - W * s) / 2, oy: reserve + (ch - reserve - H * s) / 2 });
+    drawField();
+  }
 
   // ---------- Утилиты ----------
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -303,7 +347,7 @@
       team, kind, ctrl, role: 'field', slot: SLOTS[1][0], label: '',
       x: 0, y: 0, vx: 0, vy: 0, r: PR, m: 5, face: team === 0 ? 0 : Math.PI,
       maxV: HUMAN_V, kickCd: 0, kickBuf: 0, kickFx: 0, grabCd: 0, noBallT: 0,
-      charging: false, chargeT: 0, pendingKick: null, holdAng: 0,
+      chargeT: 0, pendingKick: null, holdAng: 0,
       tx: 0, ty: 0, spd: 0, thinkT: 0, want: null, holdT: 0, aimY: rand(-GOAL_H * 0.35, GOAL_H * 0.35),
     };
   }
@@ -314,7 +358,7 @@
     for (const t of [0, 1]) {
       const list = [];
       if (t === 0) list.push(newPlayer(0, 'human', 'p1'));
-      if (t === 1 && settings.p2) list.push(newPlayer(1, 'human', 'p2'));
+      if (t === 1 && settings.p2 && !touchMode) list.push(newPlayer(1, 'human', 'p2'));
       const humans = list.length;
       for (let i = 0; i < settings.bots[t]; i++) list.push(newPlayer(t, 'bot', null));
       if (settings.bots[t] >= 1 && list.length >= 3) list[humans].role = 'keeper';
@@ -423,7 +467,6 @@
     }
   }
 
-  // Удар. fromHold: мяч ставится перед игроком в сторону удара
   function tryKick(p, dx, dy, power) {
     if (p.kickCd > 0) return false;
     const held = ball.holder === p;
@@ -497,7 +540,7 @@
     // заряд удара (мышь или сенсорная кнопка)
     if (charging) p.chargeT += dt;
 
-    // удар после отпускания ЛКМ
+    // удар после отпускания кнопки
     if (p.pendingKick) {
       p.pendingKick.t -= dt;
       if (p.pendingKick.t <= 0) p.pendingKick = null;
@@ -770,9 +813,12 @@
 
   // ---------- Отрисовка ----------
   function drawField() {
+    const s = view.s;
+    fieldCanvas.width = Math.ceil(W * s * dpr);
+    fieldCanvas.height = Math.ceil(H * s * dpr);
     const c = fieldCanvas.getContext('2d');
-    c.setTransform(dpr, 0, 0, dpr, 0, 0);
-    c.fillStyle = '#23692a'; c.fillRect(0, 0, W, H);
+    c.setTransform(dpr * s, 0, 0, dpr * s, 0, 0);
+    c.fillStyle = GRASS; c.fillRect(-2, -2, W + 4, H + 4);
     const n = 16, sw = F.w / n;
     for (let i = 0; i < n; i++) {
       c.fillStyle = i % 2 ? '#2b8031' : '#30893a';
@@ -795,16 +841,16 @@
     c.beginPath(); c.arc(F.cx, F.cy, 4, 0, Math.PI * 2); c.fill();
     const th = Math.acos((PB_D - SPOT) / ARC_R);
     for (const side of [0, 1]) {
-      const s = side === 0 ? 1 : -1, gx = side === 0 ? F.l : F.r;
+      const sg = side === 0 ? 1 : -1, gx = side === 0 ? F.l : F.r;
       c.strokeRect(side === 0 ? F.l : F.r - PB_D, F.cy - PB_H / 2, PB_D, PB_H);
       c.strokeRect(side === 0 ? F.l : F.r - GA_D, F.cy - GA_H / 2, GA_D, GA_H);
-      c.beginPath(); c.arc(gx + s * SPOT, F.cy, 3.5, 0, Math.PI * 2); c.fill();
+      c.beginPath(); c.arc(gx + sg * SPOT, F.cy, 3.5, 0, Math.PI * 2); c.fill();
       c.beginPath();
       if (side === 0) c.arc(gx + SPOT, F.cy, ARC_R, -th, th);
       else c.arc(gx - SPOT, F.cy, ARC_R, Math.PI - th, Math.PI + th);
       c.stroke();
       c.beginPath();
-      c.moveTo(gx, G.t); c.lineTo(gx - s * GOAL_D, G.t); c.lineTo(gx - s * GOAL_D, G.b); c.lineTo(gx, G.b);
+      c.moveTo(gx, G.t); c.lineTo(gx - sg * GOAL_D, G.t); c.lineTo(gx - sg * GOAL_D, G.b); c.lineTo(gx, G.b);
       c.stroke();
     }
     for (const [x, y, a] of [[F.l, F.t, 0], [F.r, F.t, Math.PI / 2], [F.r, F.b, Math.PI], [F.l, F.b, -Math.PI / 2]]) {
@@ -829,7 +875,6 @@
     ctx.stroke();
     ctx.restore();
     if (charging) {
-      // шкала силы удара вокруг игрока
       ctx.lineWidth = 4;
       ctx.strokeStyle = 'rgba(0,0,0,0.35)';
       ctx.beginPath(); ctx.arc(p.x, p.y, PR + 11, 0, Math.PI * 2); ctx.stroke();
@@ -890,24 +935,30 @@
     ctx.beginPath(); ctx.arc(ball.x, ball.y, BR, 0, Math.PI * 2); ctx.stroke();
   }
 
+  // надпись поперёк всего экрана (размер шрифта не меньше читаемого)
   function banner(text, sub, color) {
+    const s = view.s, x0 = -view.ox / s, w = view.cw / s;
+    const big = Math.max(60, 30 / s), small = Math.max(20, 14 / s), hh = big * 1.1 + (sub ? small * 2 : 0);
     ctx.fillStyle = 'rgba(0,0,0,0.5)';
-    ctx.fillRect(0, H / 2 - 64, W, 128);
+    ctx.fillRect(x0, H / 2 - hh / 2, w, hh);
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillStyle = color || '#fff';
-    ctx.font = '800 60px "Segoe UI", system-ui, sans-serif';
-    ctx.fillText(text, W / 2, H / 2 - (sub ? 14 : 0));
+    ctx.font = `800 ${big}px "Segoe UI", system-ui, sans-serif`;
+    ctx.fillText(text, W / 2, H / 2 - (sub ? small * 0.8 : 0));
     if (sub) {
-      ctx.fillStyle = 'rgba(255,255,255,0.85)';
-      ctx.font = '500 20px "Segoe UI", system-ui, sans-serif';
-      ctx.fillText(sub, W / 2, H / 2 + 38);
+      ctx.fillStyle = 'rgba(255,255,255,0.88)';
+      ctx.font = `500 ${small}px "Segoe UI", system-ui, sans-serif`;
+      ctx.fillText(sub, W / 2, H / 2 + big * 0.5);
     }
   }
 
   function render() {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.drawImage(fieldCanvas, 0, 0);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = GRASS;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const px = Math.round(view.ox * dpr), py = Math.round(view.oy * dpr);
+    ctx.drawImage(fieldCanvas, px, py);
+    ctx.setTransform(dpr * view.s, 0, 0, dpr * view.s, px, py);
     const act = activePlayers();
     drawAim(human('p1'));
     act.forEach(drawPlayer);
@@ -917,15 +968,17 @@
       ctx.beginPath(); ctx.arc(x, y, POST_R, 0, Math.PI * 2); ctx.fill();
     }
     if (!settings.botsOn) {
+      const fs = Math.max(14, 11 / view.s);
       ctx.fillStyle = 'rgba(0,0,0,0.4)';
-      ctx.fillRect(F.cx - 75, 12, 150, 26);
-      ctx.fillStyle = '#fff'; ctx.font = '600 14px "Segoe UI", system-ui, sans-serif';
+      ctx.fillRect(F.cx - fs * 5.5, F.b - fs * 2.4, fs * 11, fs * 1.8);
+      ctx.fillStyle = '#fff'; ctx.font = `600 ${fs}px "Segoe UI", system-ui, sans-serif`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText('Боты выключены', F.cx, 25);
+      ctx.fillText('Боты выключены', F.cx, F.b - fs * 1.5);
     }
+    if (document.body.classList.contains('menu-open')) return;
     if (state === 'goal') banner('ГОЛ!', lastScorer === 0 ? 'Забили синие' : 'Забили красные', COLORS[lastScorer].main);
     else if (state === 'kickoff') banner('Начало!', null);
-    else if (state === 'paused') banner('Пауза', touchMode ? 'Коснитесь экрана, чтобы продолжить' : 'P или Esc — продолжить');
+    else if (state === 'paused') banner('Пауза', touchMode ? 'Коснитесь экрана, чтобы продолжить' : 'P — продолжить, Esc — меню');
     else if (state === 'over') {
       const res = score[0] === score[1] ? 'Ничья' : score[0] > score[1] ? 'Победили синие' : 'Победили красные';
       banner(`${score[0]} : ${score[1]}`, `Матч окончен — ${res}. ${touchMode ? 'Коснитесь экрана' : 'R'} — новый матч`,
@@ -933,8 +986,7 @@
     }
   }
 
-  // ---------- HUD и настройки ----------
-  const $ = id => document.getElementById(id);
+  // ---------- HUD ----------
   let lastTimerText = '';
   function updateHUD() {
     $('scoreBlue').textContent = score[0];
@@ -949,36 +1001,103 @@
     if (txt !== lastTimerText) { $('timer').textContent = txt; lastTimerText = txt; }
   }
 
+  let toastTimer = 0;
+  function toast(msg, ms = 4500) {
+    const el = $('toast');
+    el.textContent = msg; el.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove('show'), ms);
+  }
+
+  // ---------- Пауза и меню ----------
+  function setPaused(on) {
+    if (on && state !== 'paused' && state !== 'over') { pausedFrom = state; state = 'paused'; }
+    else if (!on && state === 'paused') state = pausedFrom;
+  }
+  const menuOpen = () => document.body.classList.contains('menu-open');
+  function openMenu() {
+    document.body.classList.add('menu-open');
+    setPaused(true);
+    keys.clear(); mouse.l = mouse.r = false;
+  }
+  function closeMenu() {
+    document.body.classList.remove('menu-open');
+    $('playBtn').textContent = '▶ Продолжить';
+    setPaused(false);
+  }
+
+  // ---------- Полноэкранный режим ----------
+  const docEl = document.documentElement;
+  const canFS = !!(docEl.requestFullscreen || docEl.webkitRequestFullscreen);
+  const isFS = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+  const standalone = window.navigator.standalone === true ||
+    window.matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches;
+
+  function enterFS() {
+    if (!canFS || isFS()) return;
+    try {
+      const req = docEl.requestFullscreen || docEl.webkitRequestFullscreen;
+      const res = req.call(docEl, { navigationUI: 'hide' });
+      const lock = () => {
+        if (touchMode && screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(() => {});
+      };
+      if (res && res.then) res.then(lock).catch(() => {}); else lock();
+    } catch (e) { /* не поддерживается */ }
+  }
+  function exitFS() {
+    try { (document.exitFullscreen || document.webkitExitFullscreen).call(document); } catch (e) { /* ignore */ }
+  }
+  function toggleFS() {
+    if (!canFS) {
+      toast(standalone ? 'Игра уже открыта на весь экран'
+        : 'На iPhone: нажмите «Поделиться» → «На экран Домой», и игра будет открываться на весь экран');
+      return;
+    }
+    isFS() ? exitFS() : enterFS();
+  }
+  function updateFsButtons() {
+    const on = isFS();
+    $('fsBtn').textContent = on ? '✕' : '⛶';
+    $('fsBtn').title = on ? 'Выйти из полноэкранного режима (F)' : 'Во весь экран (F)';
+    $('fsMenuBtn').textContent = on ? '✕ Выйти из полного экрана' : '⛶ Во весь экран';
+    if (standalone) { $('fsBtn').style.display = 'none'; $('fsMenuBtn').style.display = 'none'; }
+  }
+  document.addEventListener('fullscreenchange', () => { updateFsButtons(); setTimeout(resize, 50); });
+  document.addEventListener('webkitfullscreenchange', () => { updateFsButtons(); setTimeout(resize, 50); });
+
+  // ---------- Кнопки ----------
   function setBots(on) {
     settings.botsOn = on;
     const b = $('botsBtn');
-    b.textContent = on ? 'Боты: ВКЛ' : 'Боты: ВЫКЛ';
+    b.textContent = on ? 'ВКЛ' : 'ВЫКЛ';
     b.className = on ? 'on' : 'off';
     if (on) players.filter(p => p.kind === 'bot').forEach(placePlayer);
     else if (ball.holder && ball.holder.kind === 'bot') ball.holder = null;
   }
+  function rebuild() { buildTeams(); kickoff(); if (menuOpen()) setPaused(true); }
 
-  function togglePause() {
-    if (state === 'paused') { state = pausedFrom; $('pauseBtn').textContent = 'Пауза'; }
-    else if (state !== 'over') { pausedFrom = state; state = 'paused'; $('pauseBtn').textContent = 'Продолжить'; }
-  }
+  const blurAfter = fn => e => { fn(e); if (e.target.blur) e.target.blur(); };
+  $('botsBtn').onclick = blurAfter(e => { e.preventDefault(); setBots(!settings.botsOn); });
+  $('blueBots').onchange = blurAfter(e => { settings.bots[0] = +e.target.value; rebuild(); });
+  $('redBots').onchange = blurAfter(e => { settings.bots[1] = +e.target.value; rebuild(); });
+  $('p2').onchange = blurAfter(e => { settings.p2 = e.target.checked; rebuild(); });
+  $('diff').onchange = blurAfter(e => { settings.diff = e.target.value; });
+  $('time').onchange = blurAfter(e => { settings.time = +e.target.value; newMatch(); if (menuOpen()) setPaused(true); });
+  $('sound').onchange = blurAfter(e => { settings.sound = e.target.checked; });
+  $('menuBtn').onclick = blurAfter(() => { menuOpen() ? closeMenu() : openMenu(); });
+  $('fsBtn').onclick = blurAfter(toggleFS);
+  $('fsMenuBtn').onclick = blurAfter(toggleFS);
+  $('playBtn').onclick = blurAfter(() => { closeMenu(); if (touchMode) enterFS(); });
+  $('resetBtn').onclick = blurAfter(() => { newMatch(); closeMenu(); if (touchMode) enterFS(); });
+  $('portraitOk').onclick = () => document.body.classList.add('portrait-ok');
 
-  function rebuild() { buildTeams(); kickoff(); }
-
-  $('botsBtn').onclick = e => { setBots(!settings.botsOn); e.target.blur(); };
-  $('blueBots').onchange = e => { settings.bots[0] = +e.target.value; rebuild(); e.target.blur(); };
-  $('redBots').onchange = e => { settings.bots[1] = +e.target.value; rebuild(); e.target.blur(); };
-  $('p2').onchange = e => { settings.p2 = e.target.checked; rebuild(); e.target.blur(); };
-  $('diff').onchange = e => { settings.diff = e.target.value; e.target.blur(); };
-  $('time').onchange = e => { settings.time = +e.target.value; newMatch(); e.target.blur(); };
-  $('sound').onchange = e => { settings.sound = e.target.checked; e.target.blur(); };
-  $('pauseBtn').onclick = e => { togglePause(); e.target.blur(); };
-  $('resetBtn').onclick = e => { $('pauseBtn').textContent = 'Пауза'; newMatch(); e.target.blur(); };
-
-  // клавиатура
+  // ---------- Клавиатура ----------
   const PREVENT = ['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter'];
   window.addEventListener('keydown', e => {
     if (e.target.tagName === 'SELECT') return;
+    if (e.code === 'Escape') { menuOpen() ? closeMenu() : openMenu(); return; }
+    if (e.code === 'KeyF' && !e.repeat) { toggleFS(); return; }
+    if (menuOpen()) return;
     if (PREVENT.includes(e.code)) e.preventDefault();
     keys.add(e.code);
     if (e.repeat) return;
@@ -988,17 +1107,16 @@
       if (p) p.kickBuf = 0.18;
     }
     if (e.code === 'KeyB') setBots(!settings.botsOn);
-    if (e.code === 'KeyP' || e.code === 'Escape') togglePause();
-    if (e.code === 'KeyR') { $('pauseBtn').textContent = 'Пауза'; newMatch(); }
+    if (e.code === 'KeyP') setPaused(state !== 'paused');
+    if (e.code === 'KeyR') newMatch();
   });
   window.addEventListener('keyup', e => keys.delete(e.code));
   window.addEventListener('blur', () => { keys.clear(); mouse.l = mouse.r = false; });
 
-  // мышь
+  // ---------- Мышь ----------
   function setMouse(e) {
-    const r = canvas.getBoundingClientRect();
-    mouse.x = (e.clientX - r.left) * W / r.width;
-    mouse.y = (e.clientY - r.top) * H / r.height;
+    mouse.x = (e.clientX - view.ox) / view.s;
+    mouse.y = (e.clientY - view.oy) / view.s;
     mouse.active = true;
   }
   function startCharge() {
@@ -1074,46 +1192,24 @@
   touchButton($('btnKick'), () => { touch.kick = true; startCharge(); }, () => { touch.kick = false; releaseCharge(); });
   touchButton($('btnHold'), () => { touch.hold = true; }, () => { touch.hold = false; });
 
-  // меню настроек на телефоне
-  function openMenu() {
-    document.body.classList.add('menu-open');
-    if (state !== 'paused' && state !== 'over') togglePause();
-  }
-  function closeMenu() {
-    document.body.classList.remove('menu-open');
-    if (state === 'paused') togglePause();
-  }
-  $('menuBtn').onclick = e => { openMenu(); e.target.blur(); };
-  $('closeMenuBtn').onclick = e => { closeMenu(); e.target.blur(); };
-  $('resetBtn').addEventListener('click', () => { if (touchMode) closeMenu(); });
-  $('fsBtn').onclick = e => {
-    e.target.blur();
-    const d = document, el = d.documentElement;
-    try {
-      if (d.fullscreenElement || d.webkitFullscreenElement) (d.exitFullscreen || d.webkitExitFullscreen).call(d);
-      else {
-        const req = el.requestFullscreen || el.webkitRequestFullscreen;
-        const res = req && req.call(el);
-        if (res && res.then) res.then(() => screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape').catch(() => {})).catch(() => {});
-      }
-    } catch (err) { /* полноэкранный режим недоступен */ }
-  };
-  $('portraitOk').onclick = () => document.body.classList.add('portrait-ok');
-  // на телефоне касание экрана снимает паузу или начинает новый матч
+  // на телефоне касание экрана снимает паузу / начинает новый матч и включает полный экран
   window.addEventListener('pointerdown', e => {
-    if (!touchMode || document.body.classList.contains('menu-open')) return;
-    if (e.target.closest('button, select, label, .panel')) return;
-    if (state === 'paused') togglePause();
+    if (!touchMode || menuOpen()) return;
+    if (e.target.closest('button, select, label, #menu')) return;
+    enterFS();
+    if (state === 'paused') setPaused(false);
     else if (state === 'over') newMatch();
   }, true);
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden && state !== 'paused' && state !== 'over') togglePause();
-  });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) setPaused(true); });
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', () => setTimeout(resize, 200));
 
   // ---------- Старт ----------
-  drawField();
+  resize();
+  updateFsButtons();
   buildTeams();
   newMatch();
+  openMenu();
 
   const STEP = 1 / 120;
   let last = performance.now(), acc = 0;
@@ -1125,7 +1221,8 @@
     updateTimer();
     requestAnimationFrame(frame);
   }
-  requestAnimationFrame(frame);})();
+  requestAnimationFrame(frame);
+})();
 </script>
 </body>
 </html>
