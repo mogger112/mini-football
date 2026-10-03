@@ -55,6 +55,11 @@
   body.mobile .sep { font-size: 18px; }
   body.mobile .timer { font-size: 13px; padding: 1px 6px; }
   body.mobile .icon-btn { width: 36px; height: 32px; font-size: 16px; }
+  @media (max-width: 600px) {
+    .hud { left: calc(8px + env(safe-area-inset-left)); transform: none; gap: 6px; padding: 3px 8px; }
+    .team { font-size: 0; gap: 0; }
+    .num { font-size: 20px; } .sep { font-size: 17px; } .timer { font-size: 13px; }
+  }
 
   /* ---------- Меню ---------- */
   #menu {
@@ -108,9 +113,14 @@
     display: flex; align-items: center; justify-content: center; text-align: center;
     color: #fff; font-weight: 700; border: 2px solid rgba(255,255,255,.5); box-shadow: 0 4px 14px rgba(0,0,0,.4);
   }
-  #btnKick { right: calc(24px + env(safe-area-inset-right)); bottom: 28px; width: 96px; height: 96px; font-size: 16px; background: rgba(229,72,77,.6); }
-  #btnHold { right: calc(37px + env(safe-area-inset-right)); bottom: 138px; width: 70px; height: 70px; font-size: 13px; background: rgba(47,124,246,.55); }
-  .tbtn.pressed { transform: scale(.92); filter: brightness(1.35); }
+  #btnKick { right: calc(24px + env(safe-area-inset-right)); bottom: 26px; width: 108px; height: 108px; font-size: 15px; background: rgba(229,72,77,.6); }
+  #btnKick span { position: relative; pointer-events: none; text-shadow: 0 1px 3px rgba(0,0,0,.5); }
+  #kickKnob {
+    position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px; border-radius: 50%;
+    background: rgba(255,255,255,.3); border: 2px solid rgba(255,255,255,.6); pointer-events: none;
+  }
+  #btnHold { right: calc(43px + env(safe-area-inset-right)); bottom: 146px; width: 70px; height: 70px; font-size: 13px; background: rgba(47,124,246,.55); }
+  .tbtn.pressed { filter: brightness(1.35); }
 
   /* ---------- Прочее ---------- */
   #rotate { display: none; }
@@ -152,7 +162,7 @@
 <div id="touch">
   <div id="joyZone"><div id="joyBase"><div id="joyKnob"></div></div></div>
   <div id="btnHold" class="tbtn">Держать</div>
-  <div id="btnKick" class="tbtn">Удар</div>
+  <div id="btnKick" class="tbtn"><div id="kickKnob"></div><span>Удар</span></div>
 </div>
 
 <div id="menu">
@@ -193,8 +203,9 @@
       <kbd>F</kbd> — весь экран · <kbd>Esc</kbd> — меню · <kbd>P</kbd> — пауза · <kbd>B</kbd> — боты вкл/выкл · <kbd>R</kbd> — новый матч
     </div>
     <div class="help mobile-only">
-      <b>Джойстик</b> — коснитесь левой половины экрана · <b>Удар</b> — зажать, чтобы держать мяч и набрать силу, отпустить — удар ·
-      <b>Держать</b> — вести мяч · <b>⛶</b> — весь экран
+      <b>Джойстик</b> — коснитесь левой половины экрана · <b>Удар</b> — зажмите (игрок держит мяч и набирает силу),
+      потяните палец в нужную сторону, чтобы прицелиться, и отпустите — удар ·
+      <b>Держать</b> — вести мяч · <b>⛶</b> — весь экран · внизу — мини-карта поля
     </div>
     <div class="actions">
       <button class="primary" id="playBtn">▶ Играть</button>
@@ -215,18 +226,18 @@
 <script>
 (() => {
   // ---------- Размеры поля (игровые координаты) ----------
-  const W = 1400, H = 880;
-  const F = { l: 60, r: 1340, t: 50, b: 830 };
+  const W = 1660, H = 1020;
+  const F = { l: 60, r: 1600, t: 50, b: 970 };
   F.w = F.r - F.l; F.h = F.b - F.t; F.cx = (F.l + F.r) / 2; F.cy = (F.t + F.b) / 2;
-  const GOAL_H = 180, GOAL_D = 40;
+  const GOAL_H = 200, GOAL_D = 42;
   const G = { t: F.cy - GOAL_H / 2, b: F.cy + GOAL_H / 2 };
-  const PB_D = 190, PB_H = 440;   // штрафная
-  const GA_D = 65, GA_H = 240;    // вратарская
-  const SPOT = 135, ARC_R = 85, CC_R = 95;
+  const PB_D = 210, PB_H = 480;   // штрафная
+  const GA_D = 70, GA_H = 260;    // вратарская
+  const SPOT = 145, ARC_R = 90, CC_R = 105;
   const PR = 16;          // радиус игрока
   const BR = PR / 2;      // радиус мяча — в два раза меньше игрока
   const POST_R = 4;
-  const HUMAN_V = 260;
+  const HUMAN_V = 275;
   const KICK_REACH = 10;
   const HOLD_REACH = PR + BR + 12;
   const HUMAN_KICK = 820;
@@ -240,9 +251,9 @@
   };
 
   const DIFF = {
-    easy:   { speed: 0.72, noise: 0.28, predict: 0.4, shoot: 300, react: 0.28 },
-    normal: { speed: 0.87, noise: 0.13, predict: 0.8, shoot: 420, react: 0.13 },
-    hard:   { speed: 0.99, noise: 0.05, predict: 1.0, shoot: 520, react: 0.05 },
+    easy:   { speed: 0.72, noise: 0.28, predict: 0.4, shoot: 330, react: 0.28 },
+    normal: { speed: 0.87, noise: 0.13, predict: 0.8, shoot: 460, react: 0.13 },
+    hard:   { speed: 0.99, noise: 0.05, predict: 1.0, shoot: 570, react: 0.05 },
   };
 
   // Позиции полевых игроков (fx — от своих ворот 0..1, fy — сверху вниз 0..1)
@@ -263,7 +274,7 @@
   let state = 'kickoff', stateT = 1.2, timeLeft = 180, lastScorer = 0, pausedFrom = 'play';
   const keys = new Set();
   const mouse = { x: F.cx, y: F.cy, active: false, l: false, r: false };
-  const touch = { id: null, dx: 0, dy: 0, kick: false, hold: false };
+  const touch = { id: null, dx: 0, dy: 0, kick: false, hold: false, aimOn: false, ax: 1, ay: 0 };
   const touchMode = /[?&]mobile=1/.test(location.search) ||
     window.matchMedia('(hover: none) and (pointer: coarse)').matches ||
     (navigator.maxTouchPoints > 0 && Math.min(screen.width, screen.height) < 820);
@@ -276,19 +287,46 @@
   const ctx = canvas.getContext('2d');
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   const fieldCanvas = document.createElement('canvas');
-  const view = { cw: 1, ch: 1, s: 1, ox: 0, oy: 0 };
+  const view = { cw: 1, ch: 1, s: 1, ox: 0, oy: 0, reserve: 0, zoomed: false };
+  const cam = { x: W / 2, y: H / 2, snap: true };
 
   function resize() {
     const cw = window.innerWidth, ch = window.innerHeight;
     canvas.width = Math.round(cw * dpr);
     canvas.height = Math.round(ch * dpr);
-    // поле целиком помещается на экран, свободное место заполняется газоном
+    // если поле целиком помещается крупно — показываем его всё (свободное место — газон);
+    // иначе (телефон, маленькое окно) приближаем и камера следует за игроком
     const hudBottom = $('hud').getBoundingClientRect().bottom + 4;
     const s0 = Math.min(cw / W, ch / H);
     const reserve = Math.max(0, hudBottom - ((ch - H * s0) / 2 + F.t * s0));
-    const s = Math.min(cw / W, (ch - reserve) / H);
-    Object.assign(view, { cw, ch, s, ox: (cw - W * s) / 2, oy: reserve + (ch - reserve - H * s) / 2 });
+    const sFit = Math.min(cw / W, (ch - reserve) / H);
+    const sMin = touchMode ? Math.min(0.85, ch / 400) : 0.62;
+    const s = Math.max(sFit, sMin);
+    const zoomed = s > sFit + 1e-6;
+    Object.assign(view, { cw, ch, s, reserve, zoomed });
+    cam.snap = true;
+    updateCamera(0);
     drawField();
+  }
+
+  function updateCamera(dt) {
+    const { cw, ch, s, reserve } = view;
+    if (!view.zoomed) {
+      view.ox = (cw - W * s) / 2;
+      view.oy = reserve + (ch - reserve - H * s) / 2;
+      return;
+    }
+    const p = human('p1');
+    const tx = p ? p.x + (ball.x - p.x) * 0.35 : ball.x;
+    const ty = p ? p.y + (ball.y - p.y) * 0.35 : ball.y;
+    const k = cam.snap ? 1 : 1 - Math.exp(-5 * dt);
+    cam.snap = false;
+    cam.x += (tx - cam.x) * k;
+    cam.y += (ty - cam.y) * k;
+    const vw = W * s, vh = H * s;
+    const ox = cw / 2 - cam.x * s, oy = ch / 2 - cam.y * s;
+    view.ox = vw > cw ? clamp(ox, cw - vw, 0) : (cw - vw) / 2;
+    view.oy = vh > ch ? clamp(oy, ch - vh, 0) : (ch - vh) / 2;
   }
 
   // ---------- Утилиты ----------
@@ -397,6 +435,7 @@
     players.forEach(placePlayer);
     Object.assign(ball, { x: F.cx, y: F.cy, vx: 0, vy: 0, trail: [] });
     state = 'kickoff'; stateT = 1.2;
+    cam.snap = true;
     sfx('whistle');
   }
 
@@ -462,8 +501,8 @@
     p.x = clamp(p.x, F.l, F.r);
     p.y = clamp(p.y, F.t - 6, F.b + 6);
     if (p.kind === 'bot' && p.role === 'keeper') {
-      if (p.team === 0) p.x = Math.min(p.x, F.l + 220);
-      else p.x = Math.max(p.x, F.r - 220);
+      if (p.team === 0) p.x = Math.min(p.x, F.l + 240);
+      else p.x = Math.max(p.x, F.r - 240);
     }
   }
 
@@ -520,7 +559,8 @@
 
     // направление прицела: джойстик, курсор мыши (для P1) или направление бега
     let aim = p.face;
-    if (joy && il > 0.3) aim = Math.atan2(iy, ix);
+    if (isP1 && touch.kick && touch.aimOn) aim = Math.atan2(touch.ay, touch.ax);
+    else if (joy && il > 0.3) aim = Math.atan2(iy, ix);
     else if (isP1 && mouse.active) aim = Math.atan2(mouse.y - p.y, mouse.x - p.x);
     p.aim = aim;
 
@@ -544,7 +584,10 @@
     if (p.pendingKick) {
       p.pendingKick.t -= dt;
       if (p.pendingKick.t <= 0) p.pendingKick = null;
-      else if (tryKick(p, Math.cos(aim), Math.sin(aim), p.pendingKick.power)) p.pendingKick = null;
+      else {
+        const ka = p.pendingKick.ang ?? aim;
+        if (tryKick(p, Math.cos(ka), Math.sin(ka), p.pendingKick.power)) p.pendingKick = null;
+      }
     }
 
     // быстрый удар с клавиатуры
@@ -604,7 +647,7 @@
     for (const q of act) {
       if (q.team !== p.team || q === p || q.role === 'keeper') continue;
       const adv = (q.x - p.x) * dir, d = dist(p, q);
-      if (adv < 40 || d < 100 || d > 620) continue;
+      if (adv < 40 || d < 100 || d > 700) continue;
       let open = true;
       for (const o of act) {
         if (o.team === p.team) continue;
@@ -667,7 +710,7 @@
     let oppD = Infinity;
     for (const q of act) if (q.team !== t) oppD = Math.min(oppD, dist(q, ball));
     const myD = dist(p, ball);
-    const inBox = Math.abs(ball.x - ox) < 200 && Math.abs(ball.y - F.cy) < 225;
+    const inBox = Math.abs(ball.x - ox) < 220 && Math.abs(ball.y - F.cy) < 245;
     const slow = Math.hypot(ball.vx, ball.vy) < 140;
     if (inBox && (myD < oppD * 1.15 || slow || (ball.holder && ball.holder.team !== t))) {
       let dx = dir, dy = (ball.y - F.cy) / 260;
@@ -703,7 +746,7 @@
     for (const q of act) {
       if (q === p || q.team !== t) continue;
       const d = dist(p, q);
-      if (d < 130 && d > 0) { tx += (p.x - q.x) / d * (130 - d) * 0.6; ty += (p.y - q.y) / d * (130 - d) * 0.6; }
+      if (d < 140 && d > 0) { tx += (p.x - q.x) / d * (140 - d) * 0.6; ty += (p.y - q.y) / d * (140 - d) * 0.6; }
     }
     p.tx = clamp(tx, F.l + PR, F.r - PR); p.ty = clamp(ty, F.t + PR, F.b - PR); p.spd = 0.78;
   }
@@ -819,7 +862,7 @@
     const c = fieldCanvas.getContext('2d');
     c.setTransform(dpr * s, 0, 0, dpr * s, 0, 0);
     c.fillStyle = GRASS; c.fillRect(-2, -2, W + 4, H + 4);
-    const n = 16, sw = F.w / n;
+    const n = 18, sw = F.w / n;
     for (let i = 0; i < n; i++) {
       c.fillStyle = i % 2 ? '#2b8031' : '#30893a';
       c.fillRect(F.l + i * sw, F.t, sw + 0.5, F.h);
@@ -952,6 +995,50 @@
     }
   }
 
+  // мини-карта и стрелка к мячу (только когда камера приближена), в экранных координатах
+  function drawOverlay() {
+    if (!view.zoomed) return;
+    const { cw, ch, s, ox, oy } = view;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    // стрелка к мячу, если он за краем экрана
+    const bx = ox + ball.x * s, by = oy + ball.y * s, m = 26;
+    if (bx < 0 || bx > cw || by < 0 || by > ch) {
+      const cx = clamp(bx, m, cw - m), cy = clamp(by, m + 34, ch - m);
+      const a = Math.atan2(by - cy, bx - cx);
+      ctx.save();
+      ctx.translate(cx, cy); ctx.rotate(a);
+      ctx.fillStyle = 'rgba(255,255,255,0.92)';
+      ctx.strokeStyle = 'rgba(0,0,0,0.5)'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(14, 0); ctx.lineTo(-8, -10); ctx.lineTo(-3, 0); ctx.lineTo(-8, 10); ctx.closePath();
+      ctx.fill(); ctx.stroke();
+      ctx.restore();
+    }
+
+    // мини-карта
+    const mw = Math.min(170, cw * 0.24), mh = mw * H / W, k = mw / W;
+    const mx = (cw - mw) / 2, my = ch - mh - 8;
+    ctx.fillStyle = 'rgba(10,16,22,0.55)';
+    ctx.fillRect(mx - 3, my - 3, mw + 6, mh + 6);
+    ctx.fillStyle = 'rgba(48,137,58,0.85)';
+    ctx.fillRect(mx + F.l * k, my + F.t * k, F.w * k, F.h * k);
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 1;
+    ctx.strokeRect(mx + F.l * k, my + F.t * k, F.w * k, F.h * k);
+    ctx.beginPath(); ctx.moveTo(mx + F.cx * k, my + F.t * k); ctx.lineTo(mx + F.cx * k, my + F.b * k); ctx.stroke();
+    for (const p of activePlayers()) {
+      ctx.fillStyle = p.role === 'keeper' ? COLORS[p.team].keeper : COLORS[p.team].main;
+      ctx.beginPath(); ctx.arc(mx + p.x * k, my + p.y * k, p.kind === 'human' ? 3.6 : 2.6, 0, Math.PI * 2); ctx.fill();
+      if (p.kind === 'human') { ctx.strokeStyle = '#ffd60a'; ctx.lineWidth = 1.5; ctx.stroke(); }
+    }
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(mx + ball.x * k, my + ball.y * k, 2.2, 0, Math.PI * 2); ctx.fill();
+    // видимая область
+    const vx = clamp(-ox / s, 0, W), vy = clamp(-oy / s, 0, H);
+    const vw = Math.min(W, (cw - ox) / s) - vx, vh = Math.min(H, (ch - oy) / s) - vy;
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 1;
+    ctx.strokeRect(mx + vx * k, my + vy * k, vw * k, vh * k);
+  }
+
   function render() {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = GRASS;
@@ -975,7 +1062,9 @@
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText('Боты выключены', F.cx, F.b - fs * 1.5);
     }
+    drawOverlay();
     if (document.body.classList.contains('menu-open')) return;
+    ctx.setTransform(dpr * view.s, 0, 0, dpr * view.s, px, py);
     if (state === 'goal') banner('ГОЛ!', lastScorer === 0 ? 'Забили синие' : 'Забили красные', COLORS[lastScorer].main);
     else if (state === 'kickoff') banner('Начало!', null);
     else if (state === 'paused') banner('Пауза', touchMode ? 'Коснитесь экрана, чтобы продолжить' : 'P — продолжить, Esc — меню');
@@ -1125,7 +1214,7 @@
   }
   function releaseCharge() {
     const p = human('p1');
-    if (p && state === 'play') p.pendingKick = { power: chargePower(p.chargeT), t: 0.15 };
+    if (p && state === 'play') p.pendingKick = { power: chargePower(p.chargeT), t: 0.15, ang: p.aim };
     if (p) p.chargeT = 0;
   }
   canvas.addEventListener('mousemove', e => { if (!touchMode) setMouse(e); });
@@ -1189,7 +1278,38 @@
     el.addEventListener('pointerup', end);
     el.addEventListener('pointercancel', end);
   }
-  touchButton($('btnKick'), () => { touch.kick = true; startCharge(); }, () => { touch.kick = false; releaseCharge(); });
+  // кнопка «Удар» — ещё и стик прицела: зажать и потянуть в сторону удара
+  const kickBtn = $('btnKick'), kickKnob = $('kickKnob');
+  const AIM_R = 46;
+  let kickId = null, kickOx = 0, kickOy = 0;
+  function kickAim(e) {
+    let dx = e.clientX - kickOx, dy = e.clientY - kickOy;
+    const l = Math.hypot(dx, dy);
+    if (l > AIM_R) { dx *= AIM_R / l; dy *= AIM_R / l; }
+    kickKnob.style.transform = `translate(${dx}px, ${dy}px)`;
+    if (l > 12) { touch.aimOn = true; touch.ax = dx / Math.hypot(dx, dy); touch.ay = dy / Math.hypot(dx, dy); }
+  }
+  kickBtn.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    if (kickId !== null) return;
+    kickId = e.pointerId;
+    kickBtn.setPointerCapture(kickId);
+    kickBtn.classList.add('pressed');
+    kickOx = e.clientX; kickOy = e.clientY;
+    touch.kick = true; touch.aimOn = false;
+    startCharge();
+  });
+  kickBtn.addEventListener('pointermove', e => { if (e.pointerId === kickId) { e.preventDefault(); kickAim(e); } });
+  const kickEnd = e => {
+    if (e.pointerId !== kickId) return;
+    kickId = null;
+    kickBtn.classList.remove('pressed');
+    kickKnob.style.transform = '';
+    releaseCharge();           // направление запоминается в момент отпускания
+    touch.kick = false; touch.aimOn = false;
+  };
+  kickBtn.addEventListener('pointerup', kickEnd);
+  kickBtn.addEventListener('pointercancel', kickEnd);
   touchButton($('btnHold'), () => { touch.hold = true; }, () => { touch.hold = false; });
 
   // на телефоне касание экрана снимает паузу / начинает новый матч и включает полный экран
@@ -1214,9 +1334,11 @@
   const STEP = 1 / 120;
   let last = performance.now(), acc = 0;
   function frame(now) {
-    acc += Math.min(0.1, (now - last) / 1000);
+    const frameDt = Math.min(0.1, (now - last) / 1000);
+    acc += frameDt;
     last = now;
     while (acc >= STEP) { update(STEP); acc -= STEP; }
+    updateCamera(frameDt);
     render();
     updateTimer();
     requestAnimationFrame(frame);
