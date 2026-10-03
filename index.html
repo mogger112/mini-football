@@ -2188,6 +2188,9 @@
     netStatus(`Вас пригласили в открытую комнату ${pubParam}. Выберите команду и нажмите на «Комната ${pubParam}».`, 'ok');
   }
 
+  // отладка сетевой игры: ?debug=1
+  if (/[?&]debug=1/.test(location.search)) window.__mf = { net, ball, me, get players() { return players; } };
+
   // ---------- Старт ----------
   updateNetUI();
   resize();
