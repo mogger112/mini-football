@@ -975,7 +975,7 @@
   }
 
   function drawBall() {
-    const R = Math.max(BR, 4.5 / view.s);
+    const R = BR;
     const sp = Math.hypot(ball.vx, ball.vy);
     if (sp > 400 && !ball.holder) ball.trail.push({ x: ball.x, y: ball.y });
     else if (ball.trail.length) ball.trail.shift();
