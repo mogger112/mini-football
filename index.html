@@ -1597,7 +1597,7 @@
   }
 
   // подключиться к комнате; reject с type 'peer-unavailable', если комнаты нет
-  function connectTo(peer, targetId, team) {
+  function connectTo(peer, targetId, team, timeout = 12000) {
     return new Promise((res, rej) => {
       let done = false, t = 0;
       const finish = (fn, v) => {
@@ -1611,7 +1611,7 @@
       };
       peer.on('error', onErr);
       const conn = peer.connect(targetId, { reliable: true, serialization: 'json', metadata: { team } });
-      t = setTimeout(() => finish(rej, { type: 'join-timeout' }), 12000);
+      t = setTimeout(() => finish(rej, { type: 'join-timeout' }), timeout);
       conn.on('open', () => finish(res, conn));
       conn.on('error', () => finish(rej, { type: 'webrtc' }));
     });
@@ -1775,11 +1775,11 @@
   function closeRoom(silent) {
     for (const c of net.conns.values()) {
       try { c.conn.send({ t: 'bye' }); } catch (e) { /* ignore */ }
-      setTimeout(() => { try { c.conn.close(); } catch (e) { /* ignore */ } }, 300);
+      setTimeout(() => { try { c.conn.close(); } catch (e) { /* ignore */ } }, 150);
     }
     net.conns.clear();
     const peer = net.peer;
-    setTimeout(() => { try { peer && peer.destroy(); } catch (e) { /* ignore */ } }, 400);
+    setTimeout(() => { try { peer && peer.destroy(); } catch (e) { /* ignore */ } }, 250);
     Object.assign(net, { peer: null, mode: 'off', code: '', pub: 0, busy: false });
     buildTeams(); kickoff(); if (menuOpen()) setPaused(true);
     updateNetUI();
@@ -1821,32 +1821,38 @@
     }
   }
 
-  async function enterPublicRoom(n, team, attempt = 0) {
+  async function enterPublicRoom(n, team, attempt = 0, rejoin = false) {
     if (net.mode !== 'off' || (net.busy && attempt === 0)) return;
-    if (!(await netStart(`Входим в комнату ${n}…`))) return;
+    if (!(await netStart(rejoin ? `Переподключаемся к комнате ${n}…` : `Входим в комнату ${n}…`))) return;
     const id = PUB_PREFIX + n;
     let peer;
     try { peer = await openPeerRetry(); } catch (err) { netFail(err); return; }
     try {
-      const conn = await connectTo(peer, id, team);
+      const conn = await connectTo(peer, id, team, rejoin ? 6000 : 12000);
       becomeClient(peer, conn, { pub: n, team });
       toast(`Вы в открытой комнате ${n} за ${team === 0 ? 'синих' : 'красных'}`);
       return;
     } catch (err) {
       try { peer.destroy(); } catch (e) { /* ignore */ }
+      // после ухода хозяина комната может ещё пару секунд «висеть» — пробуем снова
+      if (rejoin && err.type === 'join-timeout' && attempt < 4) {
+        await sleep(800 + Math.random() * 1200);
+        return enterPublicRoom(n, team, attempt + 1, true);
+      }
       if (err.type !== 'peer-unavailable') { netFail(err); return; }
     }
     // в комнате никого нет — занимаем её и становимся хозяином
     try {
       const hp = await openPeerRetry(id);
       becomeHost(hp, { pub: n, team });
+      netStatus(`Вы — хозяин открытой комнаты ${n}.`, 'ok');
       closeMenu();
       toast(`Вы открыли комнату ${n}. Пока других игроков нет — играете с ботами.`);
     } catch (err) {
       // кто-то занял комнату одновременно с нами — тогда просто заходим к нему
-      if (err.type === 'unavailable-id' && attempt < 3) {
+      if (err.type === 'unavailable-id' && attempt < 4) {
         await sleep(600 + Math.random() * 900);
-        return enterPublicRoom(n, team, attempt + 1);
+        return enterPublicRoom(n, team, attempt + 1, rejoin);
       }
       netFail(err);
     }
@@ -1873,7 +1879,8 @@
     if (!pub) { leaveToOffline(msg); return; }
     leaveToOffline('', true);
     toast('Хозяин комнаты вышел — переподключаемся…');
-    setTimeout(() => enterPublicRoom(pub, team), 300 + Math.random() * 1200);
+    // небольшая пауза, чтобы старый хозяин успел освободить комнату; кто-то один станет новым хозяином
+    setTimeout(() => enterPublicRoom(pub, team, 0, true), 1200 + Math.random() * 1500);
   }
 
   function onClientData(d) {
