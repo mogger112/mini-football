@@ -93,6 +93,31 @@
   }
   .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
   body.mobile .desk-only, body:not(.mobile) .mobile-only { display: none !important; }
+  [hidden] { display: none !important; }
+
+  /* ---------- Игра по сети ---------- */
+  .net {
+    margin-top: 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px;
+    background: rgba(255,255,255,.03);
+  }
+  .net-title { font-weight: 700; font-size: 16px; margin-bottom: 8px; }
+  .net-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .net input {
+    width: 96px; text-transform: uppercase; letter-spacing: 3px; font-weight: 700; text-align: center;
+    background: #1f2b38; color: var(--text); border: 1px solid var(--line); border-radius: 8px;
+    padding: 7px 8px; font-size: 16px; font-family: inherit; -webkit-user-select: text; user-select: text;
+  }
+  .net .or { color: var(--muted); font-size: 13px; margin: 0 4px; }
+  .code { font-size: 24px; letter-spacing: 5px; color: #ffd60a; font-weight: 800; }
+  .hint { color: var(--muted); font-size: 13px; margin-top: 8px; line-height: 1.5; }
+  .hint.err { color: #ff7b72; }
+  .hint.ok { color: #56d364; }
+  .room-chip {
+    font-size: 13px; font-weight: 700; padding: 2px 8px; border-radius: 7px; background: rgba(47,124,246,.45);
+    letter-spacing: 1px;
+  }
+  body.net-client .host-only { display: none !important; }
+  body:not(.net-client) .client-only { display: none !important; }
   @media (max-width: 520px) { .grid { grid-template-columns: 1fr; } }
   @media (max-height: 460px) { .card { padding: 14px 16px; } .card h1 { font-size: 19px; margin-bottom: 10px; } .help { margin-top: 10px; } }
 
@@ -157,6 +182,7 @@
   <div class="num" id="scoreRed">0</div>
   <div class="team">Красные<span class="dot" style="background:var(--red)"></span></div>
   <div class="timer" id="timer">3:00</div>
+  <div class="room-chip" id="hudRoom" hidden></div>
 </div>
 <div class="hud-btns">
   <button class="icon-btn" id="menuBtn" title="Меню (Esc)" aria-label="Меню">⚙</button>
@@ -173,7 +199,8 @@
 <div id="menu">
   <div class="card">
     <h1>⚽ Мини-футбол</h1>
-    <div class="grid">
+    <div class="hint client-only" style="margin:0 0 6px">Настройки матча (боты, сложность, время) задаёт создатель комнаты.</div>
+    <div class="grid host-only">
       <label>Боты <button id="botsBtn" class="on">ВКЛ</button></label>
       <label>Сложность
         <select id="diff">
@@ -200,6 +227,35 @@
       <label>Звук <input type="checkbox" id="sound" checked></label>
       <label class="desk-only">Второй игрок <input type="checkbox" id="p2"></label>
     </div>
+
+    <div class="net">
+      <div class="net-title">🌐 Игра по сети</div>
+      <div id="netIdle">
+        <div class="net-row">
+          <button id="hostBtn">Создать комнату</button>
+          <span class="or">или</span>
+          <input id="codeInput" maxlength="4" placeholder="КОД" autocomplete="off" autocapitalize="characters" spellcheck="false">
+          <select id="joinTeam"><option value="1">за красных</option><option value="0">за синих</option></select>
+          <button id="joinBtn">Войти</button>
+        </div>
+      </div>
+      <div id="netHost" hidden>
+        <div class="net-row">
+          Код комнаты: <span class="code" id="roomCode"></span>
+          <button id="shareBtn">🔗 Пригласить</button>
+          <button id="leaveHostBtn">Закрыть комнату</button>
+        </div>
+        <div class="hint">Друзья открывают игру на ПК или телефоне, вводят этот код и нажимают «Войти» (или открывают ссылку-приглашение).
+          Подключено игроков: <b id="netCount">0</b>. Не закрывайте и не сворачивайте игру — матч идёт на вашем устройстве.</div>
+      </div>
+      <div id="netClient" hidden>
+        <div class="net-row">
+          Вы в комнате <span class="code" id="roomCode2"></span>
+          <button id="leaveClientBtn">Выйти из комнаты</button>
+        </div>
+      </div>
+      <div class="hint" id="netStatus"></div>
+    </div>
     <div class="help desk-only">
       <b>P1 (синие):</b> <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> — бег ·
       <b>зажать ЛКМ</b> — держать мяч и набирать силу, <b>отпустить</b> — удар в сторону курсора ·
@@ -215,7 +271,7 @@
     <div class="actions">
       <button class="primary" id="playBtn">▶ Играть</button>
       <button id="fsMenuBtn">⛶ Во весь экран</button>
-      <button id="resetBtn">↺ Новый матч</button>
+      <button id="resetBtn" class="host-only">↺ Новый матч</button>
     </div>
   </div>
 </div>
@@ -280,6 +336,12 @@
   const keys = new Set();
   const mouse = { x: F.cx, y: F.cy, active: false, l: false, r: false };
   const touch = { id: null, dx: 0, dy: 0, kick: false, hold: false, aimOn: false, ax: 1, ay: 0 };
+  // сеть: off — одиночная игра, host — матч считается здесь, client — показываем матч хозяина
+  const net = {
+    mode: 'off', peer: null, code: '', myId: '', hostConn: null,
+    conns: new Map(),          // у хозяина: peerId -> { conn, team, input, lastSeen }
+    events: [], lastSend: 0, prev: null, curr: null, joinTimer: 0,
+  };
   const touchMode = /[?&]mobile=1/.test(location.search) ||
     window.matchMedia('(hover: none) and (pointer: coarse)').matches ||
     (navigator.maxTouchPoints > 0 && Math.min(screen.width, screen.height) < 820);
@@ -336,7 +398,7 @@
   function updateCamera(dt) {
     const { cw, ch, s } = view;
     if (!view.zoomed) return;
-    const p = human('p1');
+    const p = me();
     const tx = p ? p.x + (ball.x - p.x) * 0.35 : ball.x;
     const ty = p ? p.y + (ball.y - p.y) * 0.35 : ball.y;
     const k = cam.snap ? 1 : 1 - Math.exp(-5 * dt);
@@ -367,6 +429,7 @@
   // ---------- Звук ----------
   let actx = null;
   function sfx(type, power = 600) {
+    if (net.mode === 'host' && net.conns.size) net.events.push(type);   // звук услышат и подключённые игроки
     if (!settings.sound) return;
     try {
       actx = actx || new (window.AudioContext || window.webkitAudioContext)();
@@ -410,26 +473,43 @@
     };
   }
 
+  // позиции для любого числа полевых игроков (по сети людей может быть много)
+  function slotsFor(n) {
+    if (SLOTS[n]) return SLOTS[n];
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const col = Math.floor(i / 3);
+      out.push({ fx: Math.max(0.1, 0.42 - col * 0.1), fy: [0.5, 0.2, 0.8][i % 3], def: col >= 2 });
+    }
+    return out;
+  }
+
   function buildTeams() {
     players = [];
     ball.holder = null;
+    let hn = 1;
     for (const t of [0, 1]) {
       const list = [];
       if (t === 0) list.push(newPlayer(0, 'human', 'p1'));
       if (t === 1 && settings.p2 && !touchMode) list.push(newPlayer(1, 'human', 'p2'));
+      if (net.mode === 'host') {
+        for (const [id, c] of net.conns) if (c.team === t) list.push(newPlayer(t, 'human', 'r:' + id));
+      }
       const humans = list.length;
       for (let i = 0; i < settings.bots[t]; i++) list.push(newPlayer(t, 'bot', null));
       if (settings.bots[t] >= 1 && list.length >= 3) list[humans].role = 'keeper';
       const field = list.filter(p => p.role !== 'keeper');
-      field.forEach((p, i) => { p.slot = SLOTS[field.length][i]; });
+      const slots = slotsFor(field.length);
+      field.forEach((p, i) => { p.slot = slots[i]; });
       let n = 2;
       for (const p of list) {
-        if (p.kind === 'human') p.label = p.ctrl.toUpperCase();
+        if (p.kind === 'human') p.label = 'P' + hn++;
         else if (p.role === 'keeper') p.label = '1';
         else p.label = String(n++);
       }
       players.push(...list);
     }
+    if (net.mode === 'host') sendRoster();
   }
 
   function homePos(p) {
@@ -449,6 +529,8 @@
 
   const activePlayers = () => players.filter(p => p.kind === 'human' || settings.botsOn);
   const human = ctrl => players.find(p => p.kind === 'human' && p.ctrl === ctrl);
+  // игрок, которым управляют с этого устройства
+  const me = () => net.mode === 'client' ? human('r:' + net.myId) : human('p1');
 
   function kickoff() {
     ball.holder = null;
@@ -551,25 +633,43 @@
   }
 
   // ---------- Управление человеком ----------
-  function humanControl(p, dt) {
-    let ix = 0, iy = 0;
+  const EMPTY_INPUT = { mx: 0, my: 0, aim: null, aimX: false, charge: false, hold: false };
+
+  // ввод с этого устройства: клавиатура, мышь, сенсорные кнопки (which: 'p1' | 'p2')
+  function localInput(p, which) {
     const k = c => keys.has(c);
-    const isP1 = p.ctrl === 'p1';
+    const isP1 = which === 'p1';
+    let mx = 0, my = 0;
+    const arrows = () => {
+      if (k('ArrowUp')) my -= 1; if (k('ArrowDown')) my += 1;
+      if (k('ArrowLeft')) mx -= 1; if (k('ArrowRight')) mx += 1;
+    };
     if (isP1) {
-      if (k('KeyW')) iy -= 1; if (k('KeyS')) iy += 1;
-      if (k('KeyA')) ix -= 1; if (k('KeyD')) ix += 1;
-      if (!settings.p2) {
-        if (k('ArrowUp')) iy -= 1; if (k('ArrowDown')) iy += 1;
-        if (k('ArrowLeft')) ix -= 1; if (k('ArrowRight')) ix += 1;
-      }
-    } else {
-      if (k('ArrowUp')) iy -= 1; if (k('ArrowDown')) iy += 1;
-      if (k('ArrowLeft')) ix -= 1; if (k('ArrowRight')) ix += 1;
-    }
-    ix = clamp(ix, -1, 1); iy = clamp(iy, -1, 1);
-    // сенсорный джойстик (аналоговый)
+      if (k('KeyW')) my -= 1; if (k('KeyS')) my += 1;
+      if (k('KeyA')) mx -= 1; if (k('KeyD')) mx += 1;
+      if (!settings.p2) arrows();
+    } else arrows();
+    mx = clamp(mx, -1, 1); my = clamp(my, -1, 1);
     const joy = isP1 && touch.id !== null;
-    if (joy) { ix += touch.dx; iy += touch.dy; }
+    if (joy) { mx += touch.dx; my += touch.dy; }
+    // направление прицела: стик «Удар», джойстик, курсор мыши; null — куда бежит игрок
+    let aim = null, aimX = false;
+    if (isP1 && touch.kick && touch.aimOn) { aim = Math.atan2(touch.ay, touch.ax); aimX = true; }
+    else if (joy && Math.hypot(mx, my) > 0.3) aim = Math.atan2(my, mx);
+    else if (isP1 && mouse.active && p) { aim = Math.atan2(mouse.y - p.y, mouse.x - p.x); aimX = true; }
+    const charge = isP1 && (mouse.l || touch.kick);
+    const hold = isP1 ? (mouse.r || touch.hold || k('ShiftLeft') || (!settings.p2 && k('ShiftRight'))) : k('ShiftRight');
+    return { mx, my, aim, aimX, charge, hold };
+  }
+
+  function inputFor(p) {
+    if (p.ctrl === 'p1' || p.ctrl === 'p2') return localInput(p, p.ctrl);
+    const c = net.conns.get(p.ctrl.slice(2));
+    return c ? c.input : EMPTY_INPUT;
+  }
+
+  function humanControl(p, dt, inp) {
+    let ix = clamp(inp.mx, -2, 2), iy = clamp(inp.my, -2, 2);
     let il = Math.hypot(ix, iy);
     if (il < 0.15) { ix = iy = il = 0; }
     if (il > 0) { ix /= il; iy /= il; }
@@ -577,18 +677,11 @@
     p.maxV = HUMAN_V * (holding ? 0.9 : 1);
     steer(p, ix, iy, Math.min(1, il), dt);
 
-    // направление прицела: джойстик, курсор мыши (для P1) или направление бега
-    let aim = p.face;
-    if (isP1 && touch.kick && touch.aimOn) aim = Math.atan2(touch.ay, touch.ax);
-    else if (joy && il > 0.3) aim = Math.atan2(iy, ix);
-    else if (isP1 && mouse.active) aim = Math.atan2(mouse.y - p.y, mouse.x - p.x);
+    const aim = inp.aim ?? p.face;
     p.aim = aim;
 
-    // держать мяч
-    const charging = isP1 && (mouse.l || touch.kick);
-    const wantHold = isP1
-      ? (charging || mouse.r || touch.hold || k('ShiftLeft') || (!settings.p2 && k('ShiftRight')))
-      : k('ShiftRight');
+    // держать мяч (зажатый удар тоже держит мяч)
+    const wantHold = inp.charge || inp.hold;
     if (wantHold && !holding && !ball.holder && p.grabCd <= 0 && dist(p, ball) <= HOLD_REACH) {
       ball.holder = p;
       p.holdAng = Math.atan2(ball.y - p.y, ball.x - p.x);
@@ -597,8 +690,7 @@
       p.grabCd = 0.15;
     }
 
-    // заряд удара (мышь или сенсорная кнопка)
-    if (charging) p.chargeT += dt;
+    if (inp.charge) p.chargeT += dt;
 
     // удар после отпускания кнопки
     if (p.pendingKick) {
@@ -610,10 +702,10 @@
       }
     }
 
-    // быстрый удар с клавиатуры
+    // быстрый удар (Пробел / Enter)
     if (p.kickBuf > 0) {
       p.kickBuf -= dt;
-      if (ball.holder === p || (isP1 && mouse.active)) {
+      if (ball.holder === p || inp.aimX) {
         if (tryKick(p, Math.cos(aim), Math.sin(aim), HUMAN_KICK)) p.kickBuf = 0;
       } else {
         const bx = ball.x - p.x, by = ball.y - p.y, d = Math.hypot(bx, by) || 1;
@@ -818,7 +910,7 @@
       p.noBallT = Math.max(0, p.noBallT - dt);
       if (p.kickFx > 0) p.kickFx -= dt;
       if (state !== 'play') steer(p, 0, 0, 0, dt);
-      else if (p.kind === 'human') humanControl(p, dt);
+      else if (p.kind === 'human') humanControl(p, dt, inputFor(p));
       else botControl(p, dt, act);
     }
 
@@ -922,7 +1014,7 @@
   }
 
   function drawAim(p) {
-    if (!p || p.ctrl !== 'p1' || state !== 'play') return;
+    if (!p || state !== 'play') return;
     const charging = mouse.l || touch.kick;
     if (!mouse.active && !charging && ball.holder !== p) return;
     const a = p.aim ?? p.face;
@@ -958,7 +1050,8 @@
       ctx.beginPath(); ctx.arc(p.x, p.y, R + (1 - k) * 16, 0, Math.PI * 2); ctx.stroke();
     }
     if (p.kind === 'human') {
-      ctx.strokeStyle = '#ffd60a'; ctx.lineWidth = 2.5;
+      // своё кольцо — жёлтое, у других людей (по сети) — белое
+      ctx.strokeStyle = p === me() || p.ctrl === 'p2' ? '#ffd60a' : 'rgba(255,255,255,0.9)'; ctx.lineWidth = 2.5;
       ctx.beginPath(); ctx.arc(p.x, p.y, R + 5, 0, Math.PI * 2); ctx.stroke();
     }
     ctx.fillStyle = col;
@@ -1070,7 +1163,7 @@
     ctx.drawImage(fieldCanvas, px, py);
     ctx.setTransform(dpr * view.s, 0, 0, dpr * view.s, px, py);
     const act = activePlayers();
-    drawAim(human('p1'));
+    drawAim(me());
     act.forEach(drawPlayer);
     drawBall();
     ctx.fillStyle = '#fff';
@@ -1090,10 +1183,12 @@
     ctx.setTransform(dpr * view.s, 0, 0, dpr * view.s, px, py);
     if (state === 'goal') banner('ГОЛ!', lastScorer === 0 ? 'Забили синие' : 'Забили красные', COLORS[lastScorer].main);
     else if (state === 'kickoff') banner('Начало!', null);
-    else if (state === 'paused') banner('Пауза', touchMode ? 'Коснитесь экрана, чтобы продолжить' : 'P — продолжить, Esc — меню');
+    else if (state === 'paused') banner('Пауза', net.mode === 'client' ? 'Ждём создателя комнаты'
+      : touchMode ? 'Коснитесь экрана, чтобы продолжить' : 'P — продолжить, Esc — меню');
     else if (state === 'over') {
       const res = score[0] === score[1] ? 'Ничья' : score[0] > score[1] ? 'Победили синие' : 'Победили красные';
-      banner(`${score[0]} : ${score[1]}`, `Матч окончен — ${res}. ${touchMode ? 'Коснитесь экрана' : 'R'} — новый матч`,
+      banner(`${score[0]} : ${score[1]}`, `Матч окончен — ${res}. ${net.mode === 'client' ? 'Новый матч начнёт создатель комнаты'
+        : (touchMode ? 'Коснитесь экрана' : 'R') + ' — новый матч'}`,
         score[0] === score[1] ? '#fff' : COLORS[score[0] > score[1] ? 0 : 1].main);
     }
   }
@@ -1123,6 +1218,7 @@
 
   // ---------- Пауза и меню ----------
   function setPaused(on) {
+    if (net.mode === 'client') return;
     if (on && state !== 'paused' && state !== 'over') { pausedFrom = state; state = 'paused'; }
     else if (!on && state === 'paused') state = pausedFrom;
   }
@@ -1211,13 +1307,17 @@
   // ---------- Клавиатура ----------
   const PREVENT = ['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Enter'];
   window.addEventListener('keydown', e => {
-    if (e.target.tagName === 'SELECT') return;
+    if (e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT') return;
     if (e.code === 'Escape') { menuOpen() ? closeMenu() : openMenu(); return; }
     if (e.code === 'KeyF' && !e.repeat) { toggleFS(); return; }
     if (menuOpen()) return;
     if (PREVENT.includes(e.code)) e.preventDefault();
     keys.add(e.code);
     if (e.repeat) return;
+    if (net.mode === 'client') {
+      if (e.code === 'Space' || e.code === 'Enter' || e.code === 'NumpadEnter') netSend({ t: 'tap' });
+      return;
+    }
     if (e.code === 'Space') { const p = human('p1'); if (p) p.kickBuf = 0.18; }
     if (e.code === 'Enter' || e.code === 'NumpadEnter') {
       const p = settings.p2 ? human('p2') : human('p1');
@@ -1237,13 +1337,20 @@
     mouse.active = true;
   }
   function startCharge() {
-    const p = human('p1');
+    const p = me();
     if (p) { p.chargeT = 0; p.pendingKick = null; }
   }
   function releaseCharge() {
-    const p = human('p1');
-    if (p && state === 'play') p.pendingKick = { power: chargePower(p.chargeT), t: 0.15, ang: p.aim };
-    if (p) p.chargeT = 0;
+    const p = me();
+    if (!p) return;
+    if (net.mode === 'client') {
+      // удар считает хозяин комнаты: отправляем силу и направление
+      const inp = localInput(p, 'p1');
+      netSend({ t: 'k', pw: Math.round(chargePower(p.chargeT)), a: inp.aim ?? p.face });
+    } else if (state === 'play') {
+      p.pendingKick = { power: chargePower(p.chargeT), t: 0.15, ang: p.aim };
+    }
+    p.chargeT = 0;
   }
   canvas.addEventListener('mousemove', e => { if (!touchMode) setMouse(e); });
   canvas.addEventListener('mousedown', e => {
@@ -1343,7 +1450,8 @@
   // на телефоне касание экрана снимает паузу / начинает новый матч и включает полный экран
   window.addEventListener('pointerdown', e => {
     if (!touchMode || menuOpen()) return;
-    if (e.target.closest('button, select, label, #menu')) return;
+    if (e.target.closest('button, select, label, input, #menu')) return;
+    if (net.mode === 'client') { enterFS(); return; }
     enterFS();
     if (state === 'paused') setPaused(false);
     else if (state === 'over') newMatch();
@@ -1352,7 +1460,343 @@
   window.addEventListener('resize', resize);
   window.addEventListener('orientationchange', () => setTimeout(resize, 200));
 
+  // ---------- Игра по сети (WebRTC через PeerJS) ----------
+  // Создатель комнаты считает матч; подключившиеся присылают ему своё управление
+  // и получают от него положение игроков и мяча ~30 раз в секунду.
+  const PEER_PREFIX = 'mini-football-mf1-';
+  const PEERJS_URL = 'https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js';
+  const MAX_REMOTE = 7;
+  const SEND_MS = 33;
+  let peerLoad = null;
+
+  function loadPeer() {
+    if (window.Peer) return Promise.resolve();
+    if (!peerLoad) peerLoad = new Promise((res, rej) => {
+      const sc = document.createElement('script');
+      sc.src = PEERJS_URL;
+      sc.onload = res;
+      sc.onerror = () => { peerLoad = null; rej(new Error('load')); };
+      document.head.appendChild(sc);
+    });
+    return peerLoad;
+  }
+
+  function makeCode() {
+    const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let c = '';
+    for (let i = 0; i < 4; i++) c += A[Math.floor(Math.random() * A.length)];
+    return c;
+  }
+
+  const r1 = v => Math.round(v * 10) / 10;
+  const r2 = v => Math.round(v * 100) / 100;
+
+  function netStatus(text, kind = '') {
+    const el = $('netStatus');
+    el.textContent = text;
+    el.className = 'hint' + (kind ? ' ' + kind : '');
+  }
+
+  function errText(err) {
+    switch (err && err.type) {
+      case 'peer-unavailable': return 'Комната не найдена. Проверьте код и что создатель комнаты не закрыл игру.';
+      case 'browser-incompatible': return 'Этот браузер не поддерживает игру по сети.';
+      case 'network': case 'server-error': case 'socket-error': case 'socket-closed':
+        return 'Нет связи с сервером соединения. Проверьте интернет.';
+      default: return 'Ошибка сети: ' + ((err && err.type) || 'неизвестная');
+    }
+  }
+
+  function updateNetUI() {
+    $('netIdle').hidden = net.mode !== 'off';
+    $('netHost').hidden = net.mode !== 'host';
+    $('netClient').hidden = net.mode !== 'client';
+    $('roomCode').textContent = $('roomCode2').textContent = net.code;
+    $('netCount').textContent = net.conns.size;
+    document.body.classList.toggle('net-client', net.mode === 'client');
+    const chip = $('hudRoom');
+    chip.hidden = net.mode === 'off';
+    chip.textContent = net.mode === 'host' ? `🌐 ${net.code} · ${net.conns.size + 1} игр.` : `🌐 ${net.code}`;
+    $('hostBtn').disabled = $('joinBtn').disabled = false;
+  }
+
+  function netSend(msg) {
+    if (net.mode !== 'client' || !net.hostConn || !net.hostConn.open) return;
+    try { net.hostConn.send(msg); } catch (e) { /* соединение закрывается */ }
+  }
+
+  function broadcast(msg) {
+    for (const c of net.conns.values()) {
+      if (c.conn.open) { try { c.conn.send(msg); } catch (e) { /* соединение закрывается */ } }
+    }
+  }
+
+  // ---- создатель комнаты ----
+  function sendRoster() {
+    broadcast({ t: 'r', ro: players.map(p => ({ tm: p.team, k: p.kind, r: p.role, l: p.label, c: p.ctrl })) });
+  }
+
+  function sendState() {
+    broadcast({
+      t: 's', st: state, tl: isFinite(timeLeft) ? r1(timeLeft) : -1, sc: score, ls: lastScorer,
+      bo: settings.botsOn ? 1 : 0,
+      p: players.map(p => [r1(p.x), r1(p.y), r2(p.face), r2(p.holdAng), p.kickFx > 0 ? 1 : 0]),
+      b: [r1(ball.x), r1(ball.y), r2(ball.rot % 1000), ball.holder ? players.indexOf(ball.holder) : -1],
+      ev: net.events,
+    });
+    net.events = [];
+  }
+
+  function hostTick(now) {
+    if (!net.conns.size) { net.events = []; return; }
+    if (now - net.lastSend >= SEND_MS) { net.lastSend = now; sendState(); }
+    // от кого давно ничего не приходило — считаем отключившимся
+    for (const [id, c] of net.conns) if (now - c.lastSeen > 8000) dropConn(id);
+  }
+
+  function dropConn(id) {
+    const c = net.conns.get(id);
+    if (!c) return;
+    net.conns.delete(id);
+    try { c.conn.close(); } catch (e) { /* уже закрыто */ }
+    buildTeams(); kickoff(); if (menuOpen()) setPaused(true);
+    updateNetUI();
+    toast('Игрок отключился');
+  }
+
+  function onHostData(id, d) {
+    const c = net.conns.get(id);
+    if (!c || !d || typeof d !== 'object') return;
+    c.lastSeen = performance.now();
+    const num = (v, a, b) => Number.isFinite(v) ? clamp(v, a, b) : 0;
+    if (d.t === 'i') {
+      c.input = {
+        mx: num(d.mx, -2, 2), my: num(d.my, -2, 2), aim: Number.isFinite(d.a) ? d.a : null,
+        aimX: !!d.ax, charge: !!d.c, hold: !!d.h,
+      };
+    } else if (d.t === 'k' || d.t === 'tap') {
+      const p = human('r:' + id);
+      if (!p || state !== 'play') return;
+      if (d.t === 'k') p.pendingKick = { power: clamp(num(d.pw, 0, 1100), 300, 1100), t: 0.25, ang: Number.isFinite(d.a) ? d.a : undefined };
+      else p.kickBuf = 0.18;
+    }
+  }
+
+  function onHostConnection(conn) {
+    conn.on('open', () => {
+      if (net.mode !== 'host') { conn.close(); return; }
+      if (net.conns.size >= MAX_REMOTE) {
+        try { conn.send({ t: 'full' }); } catch (e) { /* ignore */ }
+        setTimeout(() => conn.close(), 500);
+        return;
+      }
+      const team = conn.metadata && conn.metadata.team === 0 ? 0 : 1;
+      net.conns.set(conn.peer, { conn, team, input: { ...EMPTY_INPUT }, lastSeen: performance.now() });
+      buildTeams(); kickoff(); if (menuOpen()) setPaused(true);
+      sendState();
+      updateNetUI();
+      toast(`Игрок подключился за ${team === 0 ? 'синих' : 'красных'}!`);
+    });
+    conn.on('data', d => onHostData(conn.peer, d));
+    const gone = () => { const c = net.conns.get(conn.peer); if (c && c.conn === conn) dropConn(conn.peer); };
+    conn.on('close', gone);
+    conn.on('error', gone);
+  }
+
+  async function hostRoom() {
+    $('hostBtn').disabled = $('joinBtn').disabled = true;
+    netStatus('Создаём комнату…');
+    try { await loadPeer(); } catch (e) {
+      netStatus('Не удалось загрузить модуль сети. Проверьте интернет.', 'err'); updateNetUI(); return;
+    }
+    const tryOpen = attempt => {
+      const code = makeCode();
+      const peer = new Peer(PEER_PREFIX + code, { debug: 0 });
+      peer.on('open', () => {
+        Object.assign(net, { peer, mode: 'host', code });
+        net.conns.clear();
+        netStatus('Комната создана. Ждём игроков…', 'ok');
+        updateNetUI();
+      });
+      peer.on('connection', onHostConnection);
+      peer.on('disconnected', () => { if (net.mode === 'host' && net.peer === peer) { try { peer.reconnect(); } catch (e) { /* ignore */ } } });
+      peer.on('error', err => {
+        if (err.type === 'unavailable-id' && attempt < 5) { peer.destroy(); tryOpen(attempt + 1); return; }
+        if (net.mode === 'host') {
+          if (['network', 'server-error', 'socket-error', 'socket-closed'].includes(err.type))
+            netStatus('Связь с сервером соединения прервалась: новые игроки пока не смогут войти, текущие продолжают играть.', 'err');
+          return;
+        }
+        netStatus(errText(err), 'err');
+        peer.destroy();
+        updateNetUI();
+      });
+    };
+    tryOpen(0);
+  }
+
+  function closeRoom() {
+    for (const c of net.conns.values()) {
+      try { c.conn.send({ t: 'bye' }); } catch (e) { /* ignore */ }
+      setTimeout(() => { try { c.conn.close(); } catch (e) { /* ignore */ } }, 300);
+    }
+    net.conns.clear();
+    const peer = net.peer;
+    setTimeout(() => { try { peer && peer.destroy(); } catch (e) { /* ignore */ } }, 400);
+    Object.assign(net, { peer: null, mode: 'off', code: '' });
+    buildTeams(); kickoff(); if (menuOpen()) setPaused(true);
+    updateNetUI();
+    netStatus('Комната закрыта.');
+  }
+
+  // ---- подключившийся игрок ----
+  async function joinRoom() {
+    const code = $('codeInput').value.trim().toUpperCase();
+    if (!/^[A-Z0-9]{4}$/.test(code)) { netStatus('Введите код комнаты из 4 символов.', 'err'); return; }
+    const team = $('joinTeam').value === '0' ? 0 : 1;
+    $('hostBtn').disabled = $('joinBtn').disabled = true;
+    netStatus('Подключаемся…');
+    try { await loadPeer(); } catch (e) {
+      netStatus('Не удалось загрузить модуль сети. Проверьте интернет.', 'err'); updateNetUI(); return;
+    }
+    const peer = new Peer({ debug: 0 });
+    net.peer = peer;
+    const fail = text => {
+      clearTimeout(net.joinTimer);
+      if (net.mode === 'client') { leaveToOffline(text); return; }
+      try { peer.destroy(); } catch (e) { /* ignore */ }
+      if (net.peer === peer) net.peer = null;
+      netStatus(text, 'err');
+      updateNetUI();
+    };
+    peer.on('open', id => {
+      net.myId = id;
+      const conn = peer.connect(PEER_PREFIX + code, { reliable: true, serialization: 'json', metadata: { team } });
+      conn.on('open', () => {
+        clearTimeout(net.joinTimer);
+        net.localBotsOn = settings.botsOn;
+        Object.assign(net, { mode: 'client', code, hostConn: conn, prev: null, curr: null, lastSend: 0 });
+        players = []; ball.holder = null; mouse.l = mouse.r = false;
+        netStatus('Подключено!', 'ok');
+        updateNetUI();
+        closeMenu();
+        toast(`Вы в комнате ${code} за ${team === 0 ? 'синих' : 'красных'}`);
+      });
+      conn.on('data', onClientData);
+      conn.on('close', () => { if (net.hostConn === conn) leaveToOffline('Создатель комнаты закрыл игру или связь потеряна.'); });
+      conn.on('error', () => { if (net.hostConn === conn) leaveToOffline('Связь с создателем комнаты потеряна.'); });
+    });
+    peer.on('error', err => { if (net.mode !== 'client') fail(errText(err)); });
+    net.joinTimer = setTimeout(() => {
+      if (net.mode !== 'client') fail('Не удалось подключиться. Проверьте код и что создатель комнаты не закрыл игру.');
+    }, 15000);
+  }
+
+  function leaveToOffline(msg) {
+    clearTimeout(net.joinTimer);
+    const wasClient = net.mode === 'client';
+    const conn = net.hostConn, peer = net.peer;
+    Object.assign(net, { mode: 'off', peer: null, hostConn: null, code: '', prev: null, curr: null });
+    try { conn && conn.close(); } catch (e) { /* ignore */ }
+    try { peer && peer.destroy(); } catch (e) { /* ignore */ }
+    if (wasClient) {
+      settings.botsOn = net.localBotsOn ?? settings.botsOn;
+      buildTeams(); newMatch(); openMenu();
+    }
+    updateNetUI();
+    if (msg) { netStatus(msg, 'err'); toast(msg); } else netStatus('');
+  }
+
+  function onClientData(d) {
+    if (!d || typeof d !== 'object') return;
+    if (d.t === 'r' && Array.isArray(d.ro)) {
+      players = d.ro.map(o => {
+        const p = newPlayer(o.tm, o.k, o.c);
+        p.role = o.r; p.label = o.l;
+        return p;
+      });
+      ball.holder = null; net.prev = net.curr = null; cam.snap = true;
+    } else if (d.t === 's') {
+      if (!Array.isArray(d.p) || d.p.length !== players.length) return;
+      d.time = performance.now();
+      net.prev = net.curr; net.curr = d;
+      state = d.st; timeLeft = d.tl < 0 ? Infinity : d.tl; lastScorer = d.ls;
+      if (d.sc[0] !== score[0] || d.sc[1] !== score[1]) { score[0] = d.sc[0]; score[1] = d.sc[1]; updateHUD(); }
+      settings.botsOn = !!d.bo;
+      for (const ev of d.ev || []) sfx(ev);
+    } else if (d.t === 'full') leaveToOffline('В комнате больше нет мест.');
+    else if (d.t === 'bye') leaveToOffline('Создатель комнаты закрыл комнату.');
+  }
+
+  // кадр у подключившегося игрока: плавно двигаем всё между двумя последними снимками и отправляем управление
+  function clientFrame(now, dt) {
+    const B = net.curr;
+    if (B) {
+      if (now - B.time > 8000) { leaveToOffline('Связь с создателем комнаты потеряна.'); return; }
+      const A = net.prev && net.prev.p.length === B.p.length ? net.prev : B;
+      const iv = Math.max(15, (B.time - A.time) || SEND_MS);
+      const a = A === B ? 1 : clamp((now - B.time) / iv, 0, 1);
+      const L = (x, y) => x + (y - x) * a;
+      players.forEach((p, i) => {
+        const pa = A.p[i], pb = B.p[i];
+        p.x = L(pa[0], pb[0]); p.y = L(pa[1], pb[1]);
+        p.face = pb[2]; p.holdAng = pb[3];
+        if (pb[4] && !p.kfSeen) p.kickFx = 0.18;
+        p.kfSeen = pb[4];
+        if (p.kickFx > 0) p.kickFx -= dt;
+      });
+      const bx = L(A.b[0], B.b[0]), by = L(A.b[1], B.b[1]);
+      if (dt > 0) { ball.vx = (bx - ball.x) / dt; ball.vy = (by - ball.y) / dt; }
+      ball.x = bx; ball.y = by; ball.rot = B.b[2];
+      ball.holder = B.b[3] >= 0 ? players[B.b[3]] || null : null;
+    }
+    const p = me();
+    if (p) {
+      const inp = localInput(p, 'p1');
+      p.aim = inp.aim ?? p.face;
+      if (inp.charge) p.chargeT += dt;
+      if (now - net.lastSend >= SEND_MS) {
+        net.lastSend = now;
+        netSend({
+          t: 'i', mx: r2(inp.mx), my: r2(inp.my), a: inp.aim == null ? null : r2(inp.aim),
+          ax: inp.aimX ? 1 : 0, c: inp.charge ? 1 : 0, h: inp.hold ? 1 : 0,
+        });
+      }
+    } else if (now - net.lastSend >= 500) {
+      net.lastSend = now;
+      netSend({ t: 'i', mx: 0, my: 0, a: null, ax: 0, c: 0, h: 0 });
+    }
+  }
+
+  function shareRoom() {
+    const url = location.origin + location.pathname + '?room=' + net.code;
+    const text = `Заходи играть в мини-футбол! Код комнаты: ${net.code}`;
+    if (navigator.share) { navigator.share({ title: 'Мини-футбол', text, url }).catch(() => {}); return; }
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(url).then(() => toast('Ссылка скопирована: ' + url), () => toast(url, 9000));
+    } else toast(url, 9000);
+  }
+
+  $('hostBtn').onclick = blurAfter(hostRoom);
+  $('joinBtn').onclick = blurAfter(joinRoom);
+  $('leaveHostBtn').onclick = blurAfter(closeRoom);
+  $('leaveClientBtn').onclick = blurAfter(() => leaveToOffline(''));
+  $('shareBtn').onclick = blurAfter(shareRoom);
+  $('codeInput').addEventListener('input', e => {
+    e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4);
+  });
+  $('codeInput').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); joinRoom(); } });
+  window.addEventListener('beforeunload', () => { try { net.peer && net.peer.destroy(); } catch (e) { /* ignore */ } });
+
+  // ссылка-приглашение вида ?room=КОД
+  const roomParam = (location.search.match(/[?&]room=([A-Za-z0-9]{4})/) || [])[1];
+  if (roomParam) {
+    $('codeInput').value = roomParam.toUpperCase();
+    netStatus(`Вас пригласили в комнату ${roomParam.toUpperCase()}. Выберите команду и нажмите «Войти».`, 'ok');
+  }
+
   // ---------- Старт ----------
+  updateNetUI();
   resize();
   updateFsButtons();
   buildTeams();
@@ -1365,7 +1809,13 @@
     const frameDt = Math.min(0.1, (now - last) / 1000);
     acc += frameDt;
     last = now;
-    while (acc >= STEP) { update(STEP); acc -= STEP; }
+    if (net.mode === 'client') {
+      acc = 0;
+      clientFrame(now, frameDt);
+    } else {
+      while (acc >= STEP) { update(STEP); acc -= STEP; }
+      if (net.mode === 'host') hostTick(now);
+    }
     updateCamera(frameDt);
     render();
     updateTimer();
