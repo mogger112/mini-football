@@ -1516,7 +1516,8 @@
     document.body.classList.toggle('net-client', net.mode === 'client');
     const chip = $('hudRoom');
     chip.hidden = net.mode === 'off';
-    chip.textContent = net.mode === 'host' ? `🌐 ${net.code} · ${net.conns.size + 1} игр.` : `🌐 ${net.code}`;
+    chip.textContent = net.mode === 'host' ? `🌐 ${net.code} · ${net.conns.size + 1}👤` : `🌐 ${net.code}`;
+    chip.title = net.mode === 'host' ? `Комната ${net.code}, игроков: ${net.conns.size + 1}` : `Комната ${net.code}`;
     $('hostBtn').disabled = $('joinBtn').disabled = false;
   }
 
