@@ -358,6 +358,7 @@
   // сеть: off — одиночная игра, host — матч считается здесь, client — показываем матч хозяина
   const net = {
     mode: 'off', peer: null, code: '', pub: 0, team: 0, busy: false, myId: '', hostConn: null,
+    fast: null, rv: 0, buf: [], off: null, lastRecv: 0, newestHt: 0, seq: 0, local: null,
     conns: new Map(),          // у хозяина: peerId -> { conn, team, input, lastSeen }
     events: [], lastSend: 0, prev: null, curr: null, joinTimer: 0,
   };
@@ -529,7 +530,7 @@
       }
       players.push(...list);
     }
-    if (net.mode === 'host') sendRoster();
+    if (net.mode === 'host') { net.rv++; sendRoster(); }
   }
 
   function homePos(p) {
@@ -688,14 +689,15 @@
     return c ? c.input : EMPTY_INPUT;
   }
 
-  function humanControl(p, dt, inp) {
+  // noMove: положение игрока задаёт его собственное устройство (игрок по сети)
+  function humanControl(p, dt, inp, noMove) {
     let ix = clamp(inp.mx, -2, 2), iy = clamp(inp.my, -2, 2);
     let il = Math.hypot(ix, iy);
     if (il < 0.15) { ix = iy = il = 0; }
     if (il > 0) { ix /= il; iy /= il; }
     const holding = ball.holder === p;
     p.maxV = HUMAN_V * (holding ? 0.9 : 1);
-    steer(p, ix, iy, Math.min(1, il), dt);
+    if (!noMove) steer(p, ix, iy, Math.min(1, il), dt);
 
     const aim = inp.aim ?? p.face;
     p.aim = aim;
@@ -930,12 +932,17 @@
       p.noBallT = Math.max(0, p.noBallT - dt);
       if (p.kickFx > 0) p.kickFx -= dt;
       if (state !== 'play') steer(p, 0, 0, 0, dt);
-      else if (p.kind === 'human') humanControl(p, dt, inputFor(p));
+      else if (p.kind === 'human') {
+        const ext = remotePos(p);
+        humanControl(p, dt, inputFor(p), !!ext);
+        p.netAuth = !!ext;
+        if (ext) { p.x = ext.x; p.y = ext.y; p.vx = ext.vx; p.vy = ext.vy; }
+      }
       else botControl(p, dt, act);
     }
 
     for (const p of act) {
-      p.x += p.vx * dt; p.y += p.vy * dt;
+      if (!p.netAuth) { p.x += p.vx * dt; p.y += p.vy * dt; }
       if (Math.hypot(p.vx, p.vy) > 20) p.face = Math.atan2(p.vy, p.vx);
     }
 
@@ -1492,7 +1499,9 @@
   const PUB_ROOMS = 7;
   const PEERJS_URL = 'https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js';
   const MAX_REMOTE = 7;
-  const SEND_MS = 33;
+  const SEND_MS = 30;
+  const INTERP_MS = 80;          // у подключившихся остальные показываются с этой задержкой — так движение плавное
+  const FAST_ID = 101;           // номер отдельного быстрого канала (без повторной отправки потерянных пакетов)
   const RETRY_ERRORS = ['network', 'server-error', 'socket-error', 'socket-closed', 'timeout', 'disconnected'];
   const PEER_OPTS = {
     debug: 0,
@@ -1652,8 +1661,26 @@
     updateNetUI();
   }
 
-  function netSend(msg) {
+  // отдельный канал без повторной отправки: потерянный снимок просто заменяется следующим,
+  // и игра не «замирает», пока сеть пересылает старые данные
+  function makeFast(conn, onData) {
+    try {
+      const ch = conn.peerConnection.createDataChannel('mf-fast', { negotiated: true, id: FAST_ID, ordered: false, maxRetransmits: 0 });
+      ch.onmessage = e => { let d; try { d = JSON.parse(e.data); } catch (err) { return; } onData(d); };
+      return ch;
+    } catch (e) { return null; }
+  }
+
+  function sendFast(fast, conn, msg, str) {
+    try {
+      if (fast && fast.readyState === 'open') fast.send(str || JSON.stringify(msg));
+      else if (conn && conn.open) conn.send(msg);
+    } catch (e) { /* соединение закрывается */ }
+  }
+
+  function netSend(msg, fast) {
     if (net.mode !== 'client' || !net.hostConn || !net.hostConn.open) return;
+    if (fast) { sendFast(net.fast, net.hostConn, msg); return; }
     try { net.hostConn.send(msg); } catch (e) { /* соединение закрывается */ }
   }
 
@@ -1665,18 +1692,34 @@
 
   // ---- хозяин комнаты ----
   function sendRoster() {
-    broadcast({ t: 'r', ro: players.map(p => ({ tm: p.team, k: p.kind, r: p.role, l: p.label, c: p.ctrl })) });
+    broadcast({ t: 'r', rv: net.rv, ro: players.map(p => ({ tm: p.team, k: p.kind, r: p.role, l: p.label, c: p.ctrl })) });
   }
 
-  function sendState() {
-    broadcast({
-      t: 's', st: state, tl: isFinite(timeLeft) ? r1(timeLeft) : -1, sc: score, ls: lastScorer,
+  function sendState(now = performance.now()) {
+    const msg = {
+      t: 's', ht: Math.round(now), rv: net.rv, st: state, tl: isFinite(timeLeft) ? r1(timeLeft) : -1, sc: score, ls: lastScorer,
       bo: settings.botsOn ? 1 : 0,
       p: players.map(p => [r1(p.x), r1(p.y), r2(p.face), r2(p.holdAng), p.kickFx > 0 ? 1 : 0]),
       b: [r1(ball.x), r1(ball.y), r2(ball.rot % 1000), ball.holder ? players.indexOf(ball.holder) : -1],
       ev: net.events,
-    });
+    };
+    const str = JSON.stringify(msg);
+    for (const c of net.conns.values()) sendFast(c.fast, c.conn, msg, str);
     net.events = [];
+  }
+
+  // положение игрока по сети, которое прислало его устройство (с небольшим упреждением)
+  function remotePos(p) {
+    if (!p.ctrl || !p.ctrl.startsWith('r:') || state !== 'play') return null;
+    const c = net.conns.get(p.ctrl.slice(2));
+    if (!c || !c.pos) return null;
+    const age = (performance.now() - c.pos.t) / 1000;
+    if (age > 0.3) return null;
+    const a = Math.min(age, 0.1);
+    return {
+      x: clamp(c.pos.x + c.pos.vx * a, F.l, F.r), y: clamp(c.pos.y + c.pos.vy * a, F.t - 6, F.b + 6),
+      vx: c.pos.vx, vy: c.pos.vy,
+    };
   }
 
   function hostTick(now) {
@@ -1686,7 +1729,7 @@
       if (now - net.overT > 6000) { net.overT = 0; newMatch(); }
     } else net.overT = 0;
     if (!net.conns.size) { net.events = []; return; }
-    if (now - net.lastSend >= SEND_MS) { net.lastSend = now; sendState(); }
+    if (now - net.lastSend >= SEND_MS) { net.lastSend = now; sendState(now); }
     for (const [id, c] of net.conns) if (now - c.lastSeen > 8000) dropConn(id);
   }
 
@@ -1706,10 +1749,18 @@
     c.lastSeen = performance.now();
     const num = (v, a, b) => Number.isFinite(v) ? clamp(v, a, b) : 0;
     if (d.t === 'i') {
+      // пакеты по быстрому каналу могут прийти не по порядку — старые пропускаем
+      if (Number.isFinite(d.q)) { if (d.q <= (c.lastQ || 0)) return; c.lastQ = d.q; }
       c.input = {
         mx: num(d.mx, -2, 2), my: num(d.my, -2, 2), aim: Number.isFinite(d.a) ? d.a : null,
         aimX: !!d.ax, charge: !!d.c, hold: !!d.h,
       };
+      const vmax = HUMAN_V * 1.2;
+      if (Number.isFinite(d.px) && Number.isFinite(d.py) && d.rv === net.rv && state === 'play') {
+        c.pos = {
+          x: d.px, y: d.py, vx: num(d.vx, -vmax, vmax), vy: num(d.vy, -vmax, vmax), t: performance.now(),
+        };
+      } else c.pos = null;
     } else if (d.t === 'k' || d.t === 'tap') {
       const p = human('r:' + id);
       if (!p || state !== 'play') return;
@@ -1735,7 +1786,8 @@
         return;
       }
       const team = conn.metadata && conn.metadata.team === 0 ? 0 : 1;
-      net.conns.set(conn.peer, { conn, team, input: { ...EMPTY_INPUT }, lastSeen: performance.now() });
+      const fast = makeFast(conn, d => onHostData(conn.peer, d));
+      net.conns.set(conn.peer, { conn, fast, team, input: { ...EMPTY_INPUT }, lastSeen: performance.now(), pos: null, lastQ: 0 });
       buildTeams(); kickoff(); if (menuOpen() && !net.pub) setPaused(true);
       sendState();
       updateNetUI();
@@ -1792,8 +1844,9 @@
     if (net.mode === 'off') net.localBotsOn = settings.botsOn;
     Object.assign(net, {
       peer, mode: 'client', code, pub, team, hostConn: conn, myId: peer.id,
-      prev: null, curr: null, lastSend: 0, busy: false,
+      lastSend: 0, busy: false, rv: -1, buf: [], off: null, lastRecv: performance.now(), newestHt: 0, seq: 0, local: null,
     });
+    net.fast = makeFast(conn, onClientData);
     watchPeer(peer);
     players = []; ball.holder = null; mouse.l = mouse.r = false;
     conn.on('data', onClientData);
@@ -1863,7 +1916,8 @@
   function leaveToOffline(msg, quiet) {
     const wasClient = net.mode === 'client';
     const conn = net.hostConn, peer = net.peer;
-    Object.assign(net, { mode: 'off', peer: null, hostConn: null, code: '', pub: 0, prev: null, curr: null, busy: false });
+    try { net.fast && net.fast.close(); } catch (e) { /* ignore */ }
+    Object.assign(net, { mode: 'off', peer: null, hostConn: null, fast: null, code: '', pub: 0, buf: [], busy: false });
     try { conn && conn.close(); } catch (e) { /* ignore */ }
     try { peer && peer.destroy(); } catch (e) { /* ignore */ }
     if (wasClient) {
@@ -1888,62 +1942,130 @@
   function onClientData(d) {
     if (!d || typeof d !== 'object') return;
     if (d.t === 'r' && Array.isArray(d.ro)) {
+      if (Number.isFinite(d.rv) && d.rv < net.rv) return;
+      net.rv = d.rv;
       players = d.ro.map(o => {
         const p = newPlayer(o.tm, o.k, o.c);
         p.role = o.r; p.label = String(o.l);
         return p;
       });
-      ball.holder = null; net.prev = net.curr = null; cam.snap = true;
+      ball.holder = null; net.buf = []; net.local = null; cam.snap = true;
     } else if (d.t === 's') {
-      if (!Array.isArray(d.p) || d.p.length !== players.length) return;
-      d.time = performance.now();
-      net.prev = net.curr; net.curr = d;
-      state = d.st; timeLeft = d.tl < 0 ? Infinity : d.tl; lastScorer = d.ls;
-      if (d.sc[0] !== score[0] || d.sc[1] !== score[1]) { score[0] = d.sc[0]; score[1] = d.sc[1]; updateHUD(); }
-      settings.botsOn = !!d.bo;
+      if (d.rv !== net.rv || !Array.isArray(d.p) || d.p.length !== players.length || !Number.isFinite(d.ht)) return;
+      const now = performance.now();
+      net.lastRecv = now;
+      // разница часов хозяина и наших: берём самый «быстрый» пакет, медленно подстраиваясь
+      const sample = d.ht - now;
+      if (net.off === null || sample > net.off) net.off = sample;
+      else net.off += (sample - net.off) * 0.02;
+      // складываем снимки по времени хозяина (пакеты могут прийти не по порядку)
+      const buf = net.buf;
+      let i = buf.length;
+      while (i > 0 && buf[i - 1].ht > d.ht) i--;
+      if (i > 0 && buf[i - 1].ht === d.ht) return;
+      buf.splice(i, 0, d);
+      if (buf.length > 40) buf.splice(0, buf.length - 40);
       for (const ev of d.ev || []) sfx(ev);
+      if (d.ht > net.newestHt) {
+        net.newestHt = d.ht;
+        state = d.st; timeLeft = d.tl < 0 ? Infinity : d.tl; lastScorer = d.ls;
+        if (d.sc[0] !== score[0] || d.sc[1] !== score[1]) { score[0] = d.sc[0]; score[1] = d.sc[1]; updateHUD(); }
+        settings.botsOn = !!d.bo;
+      }
     } else if (d.t === 'full') {
       leaveToOffline(`В комнате ${net.pub ? net.pub : net.code} больше нет мест.`);
     } else if (d.t === 'bye') hostLost('Создатель комнаты закрыл комнату.');
   }
 
-  // кадр у подключившегося игрока: плавно двигаем всё между двумя последними снимками и отправляем управление
+  // Кадр у подключившегося игрока:
+  //  • остальные игроки и мяч показываются с небольшой задержкой между двумя снимками хозяина — плавно;
+  //  • свой игрок двигается сразу на этом устройстве, без ожидания ответа хозяина.
   function clientFrame(now, dt) {
-    const B = net.curr;
-    if (B) {
-      if (now - B.time > 8000) { hostLost('Связь с создателем комнаты потеряна.'); return; }
-      const A = net.prev && net.prev.p.length === B.p.length ? net.prev : B;
-      const iv = Math.max(15, (B.time - A.time) || SEND_MS);
-      const a = A === B ? 1 : clamp((now - B.time) / iv, 0, 1);
+    if (now - net.lastRecv > 8000) { hostLost('Связь с создателем комнаты потеряна.'); return; }
+    const buf = net.buf;
+    const p = me();
+    const myIdx = p ? players.indexOf(p) : -1;
+    const latest = buf[buf.length - 1];
+    if (latest) {
+      const rt = now + net.off - INTERP_MS;
+      let A = buf[0], B = buf[0];
+      for (let i = buf.length - 1; i >= 0; i--) {
+        if (buf[i].ht <= rt) { A = buf[i]; B = buf[i + 1] || buf[i]; break; }
+      }
+      const a = B === A ? 1 : clamp((rt - A.ht) / (B.ht - A.ht), 0, 1);
       const L = (x, y) => x + (y - x) * a;
-      players.forEach((p, i) => {
+      players.forEach((q, i) => {
+        if (i === myIdx) return;
         const pa = A.p[i], pb = B.p[i];
-        p.x = L(pa[0], pb[0]); p.y = L(pa[1], pb[1]);
-        p.face = pb[2]; p.holdAng = pb[3];
-        if (pb[4] && !p.kfSeen) p.kickFx = 0.18;
-        p.kfSeen = pb[4];
-        if (p.kickFx > 0) p.kickFx -= dt;
+        q.x = L(pa[0], pb[0]); q.y = L(pa[1], pb[1]);
+        q.face = pb[2]; q.holdAng = pb[3];
+        if (pb[4] && !q.kfSeen) q.kickFx = 0.18;
+        q.kfSeen = pb[4];
+        if (q.kickFx > 0) q.kickFx -= dt;
       });
       const bx = L(A.b[0], B.b[0]), by = L(A.b[1], B.b[1]);
       if (dt > 0) { ball.vx = (bx - ball.x) / dt; ball.vy = (by - ball.y) / dt; }
       ball.x = bx; ball.y = by; ball.rot = B.b[2];
       ball.holder = B.b[3] >= 0 ? players[B.b[3]] || null : null;
     }
-    const p = me();
-    if (p) {
-      const inp = localInput(p, 'p1');
-      p.aim = inp.aim ?? p.face;
-      if (inp.charge) p.chargeT += dt;
-      if (now - net.lastSend >= SEND_MS) {
-        net.lastSend = now;
-        netSend({
-          t: 'i', mx: r2(inp.mx), my: r2(inp.my), a: inp.aim == null ? null : r2(inp.aim),
-          ax: inp.aimX ? 1 : 0, c: inp.charge ? 1 : 0, h: inp.hold ? 1 : 0,
-        });
+
+    if (!p) {
+      if (now - net.lastSend >= 500) { net.lastSend = now; netSend({ t: 'i', q: ++net.seq, mx: 0, my: 0, a: null, ax: 0, c: 0, h: 0 }, true); }
+      return;
+    }
+
+    const inp = localInput(p, 'p1');
+    p.aim = inp.aim ?? p.face;
+    if (inp.charge) p.chargeT += dt;
+    const srv = latest ? latest.p[myIdx] : null;
+    const holding = latest && latest.b[3] === myIdx;
+
+    if (state === 'play' && srv) {
+      // своё движение считаем сами (так же, как у хозяина)
+      if (!net.local) net.local = { x: srv[0], y: srv[1], vx: 0, vy: 0 };
+      const loc = net.local;
+      let ix = clamp(inp.mx, -2, 2), iy = clamp(inp.my, -2, 2);
+      let il = Math.hypot(ix, iy);
+      if (il < 0.15) { ix = iy = il = 0; }
+      if (il > 0) { ix /= il; iy /= il; }
+      const vmax = HUMAN_V * (holding ? 0.9 : 1), k = Math.min(1, 10 * dt), spd = Math.min(1, il);
+      loc.vx += (ix * vmax * spd - loc.vx) * k;
+      loc.vy += (iy * vmax * spd - loc.vy) * k;
+      loc.x += loc.vx * dt; loc.y += loc.vy * dt;
+      // не проходим сквозь других игроков
+      for (const q of activePlayers()) {
+        if (q === p) continue;
+        const dx = loc.x - q.x, dy = loc.y - q.y, d = Math.hypot(dx, dy);
+        if (d > 0 && d < PR * 2) { loc.x += dx / d * (PR * 2 - d); loc.y += dy / d * (PR * 2 - d); }
       }
-    } else if (now - net.lastSend >= 500) {
+      loc.x = clamp(loc.x, F.l, F.r); loc.y = clamp(loc.y, F.t - 6, F.b + 6);
+      // если хозяин видит нас совсем в другом месте (столкновение, сброс) — подтягиваемся к нему
+      if (Math.hypot(srv[0] - loc.x, srv[1] - loc.y) > 160) { loc.x = srv[0]; loc.y = srv[1]; }
+      p.x = loc.x; p.y = loc.y;
+      if (Math.hypot(loc.vx, loc.vy) > 20) p.face = Math.atan2(loc.vy, loc.vx);
+    } else if (srv) {
+      // начало матча, гол, пауза — стоим там, где нас поставил хозяин
+      net.local = null;
+      p.x = srv[0]; p.y = srv[1]; p.face = srv[2];
+    }
+
+    // мяч у нас в ногах — рисуем его у своего игрока сразу, без задержки
+    if (holding) {
+      const maxTurn = 10 * dt;
+      p.holdAng += clamp(angDiff(p.aim ?? p.face, p.holdAng), -maxTurn, maxTurn);
+      ball.x = p.x + Math.cos(p.holdAng) * (PR + BR + 1);
+      ball.y = p.y + Math.sin(p.holdAng) * (PR + BR + 1);
+      ball.holder = p;
+    } else if (srv) p.holdAng = srv[3];
+
+    if (now - net.lastSend >= SEND_MS) {
       net.lastSend = now;
-      netSend({ t: 'i', mx: 0, my: 0, a: null, ax: 0, c: 0, h: 0 });
+      const loc = state === 'play' ? net.local : null;
+      netSend({
+        t: 'i', q: ++net.seq, rv: net.rv, mx: r2(inp.mx), my: r2(inp.my), a: inp.aim == null ? null : r2(inp.aim),
+        ax: inp.aimX ? 1 : 0, c: inp.charge ? 1 : 0, h: inp.hold ? 1 : 0,
+        px: loc ? r1(loc.x) : null, py: loc ? r1(loc.y) : null, vx: loc ? r1(loc.vx) : 0, vy: loc ? r1(loc.vy) : 0,
+      }, true);
     }
   }
 
